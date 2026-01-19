@@ -49,7 +49,7 @@ type
 const
   HelpMessage = "Nim Compiler Version $1 [$2: $3]\n" &
       "Compiled at $4\n" &
-      "Copyright (c) 2006-" & copyrightYear & " by Andreas Rumpf\n"
+      "Copyright (c) 2006-" & copyrightYear & " by Andreas Rumpf # MBG MOD v2\n"
 
 proc genFeatureDesc[T: enum](t: typedesc[T]): string {.compileTime.} =
   result = ""

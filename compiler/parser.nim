@@ -196,6 +196,8 @@ template sameOrNoInd(p): bool = p.tok.indent == p.currInd or p.tok.indent < 0
 proc validInd(p: var Parser): bool {.inline.} =
   result = p.tok.indent < 0 or p.tok.indent > p.currInd
 
+template inBraceMode(p): bool = p.lex.braceMode
+
 proc rawSkipComment(p: var Parser, node: PNode) =
   if p.tok.tokType == tkComment:
     if node != nil:
@@ -289,6 +291,7 @@ proc newIdentNodeP(ident: PIdent, p: Parser): PNode =
 
 proc parseExpr(p: var Parser): PNode
 proc parseStmt(p: var Parser): PNode
+proc parseBraceBlock(p: var Parser): PNode
 proc parseTypeDesc(p: var Parser, fullExpr = false): PNode
 proc parseTypeDefValue(p: var Parser): PNode
 proc parseParamList(p: var Parser, retColon = true): PNode
@@ -351,8 +354,19 @@ proc isOperator(tok: Token): bool =
                   tkOr, tkXor}
 
 proc colcom(p: var Parser, n: PNode) =
-  eat(p, tkColon)
-  skipComment(p, n)
+  # In brace mode, colon is optional before {
+  if inBraceMode(p):
+    if p.tok.tokType == tkCurlyLe:
+      skipComment(p, n)  # colon omitted, { follows directly
+    elif p.tok.tokType == tkColon:
+      getTok(p)  # consume optional colon
+      skipComment(p, n)
+    else:
+      # In brace mode, expect { or :
+      parMessage(p, "expected '{' or ':'")
+  else:
+    eat(p, tkColon)
+    skipComment(p, n)
 
 const tkBuiltInMagics = {tkType, tkStatic, tkAddr}
 
@@ -915,6 +929,9 @@ proc primarySuffix(p: var Parser, r: PNode,
     of tkCurlyLe:
       # progress guaranteed
       if tsLeading in p.tok.spacing:
+        # In brace mode, { with leading space is a block, not part of expression
+        if inBraceMode(p):
+          break
         result = commandExpr(p, result, mode)
         break
       result = namedParams(p, result, nkCurlyExpr, tkCurlyRi)
@@ -2489,9 +2506,31 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
   of tkUsing: result = parseSection(p, nkUsingStmt, parseVariable)
   else: result = simpleStmt(p)
 
+proc parseBraceBlock(p: var Parser): PNode =
+  ## Parse a brace-delimited block: { stmt1; stmt2; ... }
+  result = newNodeP(nkStmtList, p)
+  eat(p, tkCurlyLe)  # consume {
+  while p.tok.tokType notin {tkCurlyRi, tkEof}:
+    if p.tok.tokType == tkSemiColon:
+      getTok(p)
+    else:
+      p.hasProgress = false
+      let a = complexOrSimpleStmt(p)
+      if a.kind == nkEmpty and not p.hasProgress:
+        if p.tok.tokType notin {tkCurlyRi, tkEof}:
+          parMessage(p, errExprExpected, p.tok)
+        break
+      result.add(a)
+      if not p.hasProgress and p.tok.tokType == tkEof: break
+  eat(p, tkCurlyRi)  # consume }
+  setEndInfo()
+
 proc parseStmt(p: var Parser): PNode =
   #| stmt = (IND{>} complexOrSimpleStmt^+(IND{=} / ';') DED)
   #|      / simpleStmt ^+ ';'
+  # In brace mode, check for brace block first
+  if inBraceMode(p) and p.tok.tokType == tkCurlyLe:
+    return parseBraceBlock(p)
   if p.tok.indent > p.currInd:
     # nimpretty support here
     result = newNodeP(nkStmtList, p)
@@ -2560,7 +2599,8 @@ proc parseTopLevelStmt*(p: var Parser): PNode =
   # progress guaranteed
   while true:
     # nimpretty support here
-    if p.tok.indent != 0:
+    # In brace mode, skip indentation checks
+    if not inBraceMode(p) and p.tok.indent != 0:
       if p.firstTok and p.tok.indent < 0: discard
       elif p.tok.tokType != tkSemiColon:
         # special casing for better error messages:
@@ -2573,7 +2613,7 @@ proc parseTopLevelStmt*(p: var Parser): PNode =
     case p.tok.tokType
     of tkSemiColon:
       getTok(p)
-      if p.tok.indent <= 0: discard
+      if inBraceMode(p) or p.tok.indent <= 0: discard
       else: parMessage(p, errInvalidIndentation)
       p.firstTok = true
     of tkEof: break

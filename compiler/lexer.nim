@@ -122,6 +122,7 @@ type
                               # this is needed because scanning comments
                               # needs so much look-ahead
     currLineIndent*: int
+    braceMode*: bool          # true = brace syntax, false = indent syntax
     errorHandler*: ErrorHandler
     cache*: IdentCache
     when defined(nimsuggest):
@@ -1140,21 +1141,42 @@ proc skip(L: var Lexer, tok: var Token) =
       when defined(nimpretty):
         if L.buf[pos] == '#' and tok.line < 0: commentIndent = indent
       if L.buf[pos] > ' ' and (L.buf[pos] != '#' or L.buf[pos+1] == '#'):
-        tok.indent = indent
-        L.currLineIndent = indent
+        if L.braceMode:
+          tok.indent = 0  # signal newline but no indent tracking in brace mode
+        else:
+          tok.indent = indent
+          L.currLineIndent = indent
         break
     of '#':
       # do not skip documentation comment:
       if L.buf[pos+1] == '#': break
-      when defined(nimpretty):
-        hasComment = true
-        if tok.line < 0:
-          tok.line = L.lineNumber
-
-      if L.buf[pos+1] == '[':
+      # handle #; directives
+      if L.buf[pos+1] == ';':
+        var directive = ""
+        var dpos = pos + 2
+        while L.buf[dpos] in SymChars:
+          directive.add L.buf[dpos]
+          inc(dpos)
+        if directive == "braces":
+          L.braceMode = true
+        elif directive == "indent":
+          L.braceMode = false
+        # skip rest of line as comment
+        while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+          inc(dpos)
+        pos = dpos
+      elif L.buf[pos+1] == '[':
+        when defined(nimpretty):
+          hasComment = true
+          if tok.line < 0:
+            tok.line = L.lineNumber
         skipMultiLineComment(L, tok, pos+2, false)
         pos = L.bufpos
       else:
+        when defined(nimpretty):
+          hasComment = true
+          if tok.line < 0:
+            tok.line = L.lineNumber
         tokenBegin(tok, pos)
         while L.buf[pos] notin {CR, LF, nimlexbase.EndOfFile}:
           when defined(nimpretty): tok.literal.add L.buf[pos]
