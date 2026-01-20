@@ -855,15 +855,6 @@ proc identOrLiteral(p: var Parser, mode: PrimaryMode): PNode =
     result = exprColonEqExprList(p, nkBracket, tkBracketRi)
   of tkCast:
     result = parseCast(p)
-  of tkAlias:
-    # alias(...) call inside an alias proc body
-    result = newNodeP(nkAliasCall, p)
-    getTok(p)  # consume 'alias'
-    if p.tok.tokType == tkParLe:
-      exprColonEqExprListAux(p, tkParRi, result)
-    else:
-      parMessage(p, "expected '(' after 'alias'")
-    setEndInfo()
   else:
     parMessage(p, errExprExpected, p.tok)
     getTok(p)  # we must consume a token here to prevent endless loops!
@@ -2488,9 +2479,9 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
     # Capture pending flags BEFORE parsing routine, because parseRoutine calls
     # getTok which may process #;directive pragmas further in the file
     let pendingTransformer = p.lex.pendingTransformerName
-    let pendingAliasNow = p.lex.pendingAlias
+    let pendingAliasName = p.lex.pendingAliasName
     p.lex.pendingTransformerName = ""
-    p.lex.pendingAlias = false
+    p.lex.pendingAliasName = ""
     let routineKind = case p.tok.tokType
       of tkProc: nkProcDef
       of tkFunc: nkFuncDef
@@ -2512,8 +2503,13 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
       result.add(routine)
       setEndInfo()
     # Check if this proc is marked as an alias
-    elif pendingAliasNow:
+    elif pendingAliasName.len > 0:
       result = newNodeP(nkAliasDef, p)
+      # First child is the name for the original proc
+      var nameNode = newNodeP(nkStrLit, p)
+      nameNode.strVal = pendingAliasName
+      result.add(nameNode)
+      # Second child is the proc definition
       result.add(routine)
       setEndInfo()
     else:
@@ -2541,10 +2537,6 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
   of tkBind: result = parseBind(p, nkBindStmt)
   of tkMixin: result = parseBind(p, nkMixinStmt)
   of tkUsing: result = parseSection(p, nkUsingStmt, parseVariable)
-  of tkAlias:
-    # alias(...) call as a statement (inside an alias proc body)
-    # The 'alias proc' syntax is replaced by #;alias directive
-    result = simpleStmt(p)
   of tkEmbeddedScript:
     # Handle embedded script block from #;lang ... #;end
     result = newNodeP(nkEmbeddedScript, p)
@@ -2688,11 +2680,9 @@ proc parseTopLevelStmt*(p: var Parser): PNode =
 
 proc transformAliasProcs*(p: var Parser, stmts: PNode) =
   ## Transform alias proc definitions:
-  ## 1. Find nkAliasDef nodes
-  ## 2. Rename the original proc they're aliasing
-  ## 3. Rewrite alias(...) calls to call the renamed proc
-  ## 4. Convert nkAliasDef to regular nkProcDef
-  var aliasCounter = 0
+  ## 1. Find nkAliasDef nodes (which have [0]=name for original, [1]=new proc)
+  ## 2. Rename the original proc to the user-specified name
+  ## 3. Convert nkAliasDef to regular nkProcDef
 
   proc getProcName(n: PNode): string =
     ## Extract proc name from a proc def node
@@ -2755,41 +2745,21 @@ proc transformAliasProcs*(p: var Parser, stmts: PNode) =
         return false
     return true
 
-  proc rewriteAliasCallsInNode(n: PNode, newName: PIdent) =
-    ## Recursively replace nkAliasCall with calls to newName
-    if n.isNil:
-      return
-    # Only iterate over nodes that can have children
-    if n.kind in {nkIdent, nkSym, nkType, nkCharLit..nkUInt64Lit,
-                  nkFloatLit..nkFloat128Lit, nkStrLit..nkTripleStrLit, nkNilLit, nkEmpty}:
-      return
-    for i in 0..<n.safeLen:
-      if n[i].isNil:
-        continue
-      if n[i].kind == nkAliasCall:
-        # Convert nkAliasCall to nkCall with the renamed proc
-        let aliasCall = n[i]
-        let newCall = newNodeI(nkCall, aliasCall.info)
-        newCall.add(newIdentNode(newName, aliasCall.info))
-        for j in 0..<aliasCall.safeLen:
-          newCall.add(aliasCall[j])
-        n[i] = newCall
-      else:
-        rewriteAliasCallsInNode(n[i], newName)
-
-  # First pass: collect all alias defs and their target proc names
-  var aliasInfos: seq[tuple[idx: int, name: string, aliasDef: PNode]] = @[]
+  # First pass: collect all alias defs
+  # nkAliasDef structure: [0] = name string for original, [1] = new proc def
+  var aliasInfos: seq[tuple[idx: int, targetName: string, renamedTo: string, aliasDef: PNode]] = @[]
   for i in 0..<stmts.len:
-    if stmts[i].kind == nkAliasDef and stmts[i].len > 0:
-      let innerProc = stmts[i][0]
-      let name = getProcName(innerProc)
-      if name != "":
-        aliasInfos.add((i, name, stmts[i]))
+    if stmts[i].kind == nkAliasDef and stmts[i].len >= 2:
+      let renamedTo = stmts[i][0].strVal  # user-specified name for original
+      let innerProc = stmts[i][1]
+      let targetName = getProcName(innerProc)
+      if targetName != "" and renamedTo != "":
+        aliasInfos.add((i, targetName, renamedTo, stmts[i]))
 
-  # Second pass: for each alias, find and rename the original, then transform
+  # Second pass: for each alias, find and rename the original
   for info in aliasInfos:
-    let (aliasIdx, targetName, aliasDef) = info
-    let innerProc = aliasDef[0]
+    let (aliasIdx, targetName, renamedTo, aliasDef) = info
+    let innerProc = aliasDef[1]
     let aliasParams = getProcParams(innerProc)
 
     # Find the most recent proc with this name (could be original or previous alias)
@@ -2808,22 +2778,14 @@ proc transformAliasProcs*(p: var Parser, stmts: PNode) =
       # For now, just skip (semantic pass will catch it)
       continue
 
-    # Generate a unique name for the original proc
-    let renamedName = targetName & "__alias_" & $aliasCounter
-    inc aliasCounter
-    let renamedIdent = p.lex.cache.getIdent(renamedName)
-
-    # Rename the original proc
+    # Rename the original proc to the user-specified name
+    let renamedIdent = p.lex.cache.getIdent(renamedTo)
     let origProc = stmts[foundIdx]
     if origProc[0].kind == nkIdent:
       origProc[0] = newIdentNode(renamedIdent, origProc[0].info)
     elif origProc[0].kind == nkPostfix and origProc[0].len > 1:
       if origProc[0][1].kind == nkIdent:
         origProc[0][1] = newIdentNode(renamedIdent, origProc[0][1].info)
-
-    # Rewrite alias(...) calls in the inner proc body to use renamed proc
-    if innerProc.len > 6:  # body is at index 6
-      rewriteAliasCallsInNode(innerProc[6], renamedIdent)
 
     # Replace the nkAliasDef with the inner proc (now a regular proc def)
     stmts[aliasIdx] = innerProc

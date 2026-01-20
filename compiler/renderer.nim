@@ -1657,16 +1657,12 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
     if renderNoProcDefs notin g.flags: putWithSpace(g, tkTemplate, "template")
     gproc(g, n)
   of nkAliasDef:
-    # alias proc/func/etc - render the inner node with "alias " prefix
-    if renderNoProcDefs notin g.flags: putWithSpace(g, tkAlias, "alias")
-    if n.len > 0:
-      gsub(g, n[0])  # render the inner proc/func/etc
-  of nkAliasCall:
-    # alias(...) call - render as "alias" followed by arguments
-    put(g, tkAlias, "alias")
-    put(g, tkParLe, "(")
-    gcomma(g, n, 0)
-    put(g, tkParRi, ")")
+    # #;alias(name) proc - render as comment showing directive, then proc
+    # n[0] = name string for original, n[1] = proc def
+    if n.len >= 2:
+      put(g, tkComment, "#;alias(" & n[0].strVal & ")")
+      gcoms(g)
+      gsub(g, n[1])  # render the proc def
   of nkEmbeddedScript:
     # embedded script block - render as comment showing original form
     if n.len >= 2:

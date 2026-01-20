@@ -126,7 +126,7 @@ type
     pendingEmbeddedScript*: string  # content of pending #;lang ... #;end block
     pendingScriptLang*: string      # language name of pending embedded script
     pendingTransformerName*: string # name from #;transformer(name) directive
-    pendingAlias*: bool             # true when #;alias directive was seen
+    pendingAliasName*: string       # name from #;alias(name) directive
     errorHandler*: ErrorHandler
     cache*: IdentCache
     when defined(nimsuggest):
@@ -1200,8 +1200,22 @@ proc skip(L: var Lexer, tok: var Token) =
             inc(dpos)
           pos = dpos
         elif directive == "alias":
-          # #;alias - marks next proc as an alias definition
-          L.pendingAlias = true
+          # #;alias(name) - marks next proc as an alias, original renamed to name
+          # skip whitespace
+          while L.buf[dpos] in {' ', '\t'}:
+            inc(dpos)
+          # expect (
+          if L.buf[dpos] == '(':
+            inc(dpos)
+            # parse the name
+            var aliasName = ""
+            while L.buf[dpos] notin {')', CR, LF, nimlexbase.EndOfFile}:
+              aliasName.add L.buf[dpos]
+              inc(dpos)
+            # skip )
+            if L.buf[dpos] == ')':
+              inc(dpos)
+            L.pendingAliasName = aliasName.strip()
           # skip rest of line
           while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
             inc(dpos)
