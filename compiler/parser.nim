@@ -2549,6 +2549,28 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
     else:
       # This is 'alias(...)' as an expression statement
       result = simpleStmt(p)
+  of tkEmbeddedScript:
+    # Handle embedded script block from #;lang ... #;end
+    result = newNodeP(nkEmbeddedScript, p)
+    # tok.literal contains "langname\ncontent"
+    let content = p.tok.literal
+    let nlPos = content.find('\n')
+    var langName, scriptContent: string
+    if nlPos >= 0:
+      langName = content[0..<nlPos]
+      scriptContent = content[nlPos+1..^1]
+    else:
+      langName = content
+      scriptContent = ""
+    # Create child nodes for language name and content
+    var langNode = newNodeP(nkStrLit, p)
+    langNode.strVal = langName
+    var contentNode = newNodeP(nkStrLit, p)
+    contentNode.strVal = scriptContent
+    result.add(langNode)
+    result.add(contentNode)
+    getTok(p)
+    setEndInfo()
   else: result = simpleStmt(p)
 
 proc parseBraceBlock(p: var Parser): PNode =
@@ -2810,6 +2832,69 @@ proc transformAliasProcs*(p: var Parser, stmts: PNode) =
     # Replace the nkAliasDef with the inner proc (now a regular proc def)
     stmts[aliasIdx] = innerProc
 
+proc transformEmbeddedScripts*(p: var Parser, stmts: PNode) =
+  ## Transform embedded script blocks:
+  ## 1. Find nkEmbeddedScript nodes
+  ## 2. Process based on language (currently only "repeat" is supported)
+  ## 3. Replace with generated Nim code
+
+  proc processRepeatScript(p: var Parser, content: string, info: TLineInfo): PNode =
+    ## Process #;repeat ... #;end script
+    ## Format: each line is "count text" where count is a number
+    ## Generates: echo "text" repeated count times
+    result = newNodeI(nkStmtList, info)
+    for line in content.splitLines():
+      let trimmed = line.strip()
+      if trimmed.len == 0:
+        continue
+      # Parse "count text"
+      var count = 0
+      var text = ""
+      var i = 0
+      # Parse the number
+      while i < trimmed.len and trimmed[i] in {'0'..'9'}:
+        count = count * 10 + (ord(trimmed[i]) - ord('0'))
+        inc i
+      # Skip whitespace
+      while i < trimmed.len and trimmed[i] in {' ', '\t'}:
+        inc i
+      # Rest is the text
+      text = trimmed[i..^1]
+      # Generate count echo statements
+      for j in 0..<count:
+        let echoCall = newNodeI(nkCall, info)
+        echoCall.add(newIdentNode(p.lex.cache.getIdent("echo"), info))
+        let strLit = newNodeI(nkStrLit, info)
+        strLit.strVal = text
+        echoCall.add(strLit)
+        result.add(echoCall)
+
+  # Process each statement, looking for embedded scripts
+  var i = 0
+  while i < stmts.len:
+    let stmt = stmts[i]
+    if stmt.kind == nkEmbeddedScript and stmt.len >= 2:
+      let langName = stmt[0].strVal
+      let content = stmt[1].strVal
+      if langName == "repeat":
+        let generated = processRepeatScript(p, content, stmt.info)
+        # Replace the embedded script node with generated statements
+        if generated.len == 0:
+          # No statements generated, replace with empty node
+          stmts[i] = newNodeI(nkEmpty, stmt.info)
+        elif generated.len == 1:
+          # Single statement, replace directly
+          stmts[i] = generated[0]
+        else:
+          # Multiple statements, need to splice them in
+          # Remove the nkEmbeddedScript and insert generated statements
+          stmts.sons.delete(i)
+          for j in 0..<generated.len:
+            stmts.sons.insert(generated[j], i + j)
+          i += generated.len - 1  # -1 because we'll inc i at end of loop
+      # else: unknown language, leave the node as-is for now
+    inc i
+
 proc parseAll*(p: var Parser): PNode =
   ## Parses the rest of the input stream held by the parser into a PNode.
   result = newNodeP(nkStmtList, p)
@@ -2820,6 +2905,8 @@ proc parseAll*(p: var Parser): PNode =
     result &= nextStmt
   # Transform alias procs after parsing
   transformAliasProcs(p, result)
+  # Transform embedded scripts
+  transformEmbeddedScripts(p, result)
   setEndInfo()
 
 proc parseString*(s: string; cache: IdentCache; config: ConfigRef;
