@@ -1656,6 +1656,17 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
   of nkTemplateDef:
     if renderNoProcDefs notin g.flags: putWithSpace(g, tkTemplate, "template")
     gproc(g, n)
+  of nkAliasDef:
+    # alias proc/func/etc - render the inner node with "alias " prefix
+    if renderNoProcDefs notin g.flags: putWithSpace(g, tkAlias, "alias")
+    if n.len > 0:
+      gsub(g, n[0])  # render the inner proc/func/etc
+  of nkAliasCall:
+    # alias(...) call - render as "alias" followed by arguments
+    put(g, tkAlias, "alias")
+    put(g, tkParLe, "(")
+    gcomma(g, n, 0)
+    put(g, tkParRi, ")")
   of nkTypeSection:
     gsection(g, n, emptyContext, tkType, "type")
   of nkConstSection:

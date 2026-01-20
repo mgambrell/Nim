@@ -98,6 +98,8 @@ proc nodeKindTranslation(k: TNodeKind): string =
   of nkMacroDef: "macro"
   of nkTemplateDef: "template"
   of nkIteratorDef: "iterator"
+  of nkAliasDef: "aliasdef"
+  of nkAliasCall: "aliascall"
   of nkExceptBranch: "except"
   of nkTypeOfExpr: "typeof"
   of nkFinally: "fin"

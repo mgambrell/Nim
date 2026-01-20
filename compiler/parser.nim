@@ -855,6 +855,15 @@ proc identOrLiteral(p: var Parser, mode: PrimaryMode): PNode =
     result = exprColonEqExprList(p, nkBracket, tkBracketRi)
   of tkCast:
     result = parseCast(p)
+  of tkAlias:
+    # alias(...) call inside an alias proc body
+    result = newNodeP(nkAliasCall, p)
+    getTok(p)  # consume 'alias'
+    if p.tok.tokType == tkParLe:
+      exprColonEqExprListAux(p, tkParRi, result)
+    else:
+      parMessage(p, "expected '(' after 'alias'")
+    setEndInfo()
   else:
     parMessage(p, errExprExpected, p.tok)
     getTok(p)  # we must consume a token here to prevent endless loops!
@@ -1254,7 +1263,8 @@ proc isExprStart(p: Parser): bool =
   of tkSymbol, tkAccent, tkOpr, tkNot, tkNil, tkCast, tkIf, tkFor,
      tkProc, tkFunc, tkIterator, tkBind, tkBuiltInMagics,
      tkParLe, tkBracketLe, tkCurlyLe, tkIntLit..tkCustomLit, tkVar, tkRef, tkPtr,
-     tkEnum, tkTuple, tkObject, tkWhen, tkCase, tkOut, tkTry, tkBlock:
+     tkEnum, tkTuple, tkObject, tkWhen, tkCase, tkOut, tkTry, tkBlock,
+     tkAlias:  # alias(...) can start an expression
     result = true
   else: result = false
 
@@ -2504,6 +2514,41 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
   of tkBind: result = parseBind(p, nkBindStmt)
   of tkMixin: result = parseBind(p, nkMixinStmt)
   of tkUsing: result = parseSection(p, nkUsingStmt, parseVariable)
+  of tkAlias:
+    # Peek ahead to see if this is 'alias proc/func/...' or 'alias(...)'
+    # Look at raw buffer: skip whitespace after 'alias' and check next word
+    var peekPos = p.lex.bufpos
+    while p.lex.buf[peekPos] in {' ', '\t'}:
+      inc peekPos
+    # Check if the next word starts a routine definition
+    let isAliasProc = (p.lex.buf[peekPos] == 'p' and p.lex.buf[peekPos+1] == 'r' and p.lex.buf[peekPos+2] == 'o' and p.lex.buf[peekPos+3] == 'c') or
+                      (p.lex.buf[peekPos] == 'f' and p.lex.buf[peekPos+1] == 'u' and p.lex.buf[peekPos+2] == 'n' and p.lex.buf[peekPos+3] == 'c') or
+                      (p.lex.buf[peekPos] == 'm' and p.lex.buf[peekPos+1] == 'e' and p.lex.buf[peekPos+2] == 't' and p.lex.buf[peekPos+3] == 'h') or
+                      (p.lex.buf[peekPos] == 'i' and p.lex.buf[peekPos+1] == 't' and p.lex.buf[peekPos+2] == 'e' and p.lex.buf[peekPos+3] == 'r') or
+                      (p.lex.buf[peekPos] == 'c' and p.lex.buf[peekPos+1] == 'o' and p.lex.buf[peekPos+2] == 'n' and p.lex.buf[peekPos+3] == 'v') or
+                      (p.lex.buf[peekPos] == 't' and p.lex.buf[peekPos+1] == 'e' and p.lex.buf[peekPos+2] == 'm' and p.lex.buf[peekPos+3] == 'p') or
+                      (p.lex.buf[peekPos] == 'm' and p.lex.buf[peekPos+1] == 'a' and p.lex.buf[peekPos+2] == 'c' and p.lex.buf[peekPos+3] == 'r')
+    if isAliasProc:
+      # alias proc/func/method/etc definition
+      result = newNodeP(nkAliasDef, p)
+      getTok(p)  # consume 'alias'
+      var inner: PNode = nil
+      case p.tok.tokType
+      of tkProc: inner = parseRoutine(p, nkProcDef)
+      of tkFunc: inner = parseRoutine(p, nkFuncDef)
+      of tkMethod: inner = parseRoutine(p, nkMethodDef)
+      of tkIterator: inner = parseRoutine(p, nkIteratorDef)
+      of tkConverter: inner = parseRoutine(p, nkConverterDef)
+      of tkTemplate: inner = parseRoutine(p, nkTemplateDef)
+      of tkMacro: inner = parseRoutine(p, nkMacroDef)
+      else:
+        parMessage(p, "expected 'proc', 'func', 'method', etc. after 'alias'")
+        return p.emptyNode
+      result.add(inner)
+      setEndInfo()
+    else:
+      # This is 'alias(...)' as an expression statement
+      result = simpleStmt(p)
   else: result = simpleStmt(p)
 
 proc parseBraceBlock(p: var Parser): PNode =
@@ -2623,6 +2668,111 @@ proc parseTopLevelStmt*(p: var Parser): PNode =
       break
   setEndInfo()
 
+proc transformAliasProcs*(p: var Parser, stmts: PNode) =
+  ## Transform alias proc definitions:
+  ## 1. Find nkAliasDef nodes
+  ## 2. Rename the original proc they're aliasing
+  ## 3. Rewrite alias(...) calls to call the renamed proc
+  ## 4. Convert nkAliasDef to regular nkProcDef
+  var aliasCounter = 0
+
+  proc getProcName(n: PNode): string =
+    ## Extract proc name from a proc def node
+    if n.len > 0 and n[0].kind == nkIdent:
+      return n[0].ident.s
+    elif n.len > 0 and n[0].kind == nkPostfix and n[0].len > 1:
+      if n[0][1].kind == nkIdent:
+        return n[0][1].ident.s
+    return ""
+
+  proc getProcParams(n: PNode): PNode =
+    ## Get the formal params node from a proc def
+    if n.len > 3:
+      return n[3]  # params are at index 3
+    return nil
+
+  proc paramsMatch(a, b: PNode): bool =
+    ## Check if two formal param lists match (same types)
+    if a.isNil or b.isNil:
+      return a.isNil and b.isNil
+    if a.len != b.len:
+      return false
+    # For now, simple length check - full type matching would need sem
+    return true
+
+  proc rewriteAliasCallsInNode(n: PNode, newName: PIdent) =
+    ## Recursively replace nkAliasCall with calls to newName
+    if n.isNil:
+      return
+    # Only iterate over nodes that can have children
+    if n.kind in {nkIdent, nkSym, nkType, nkCharLit..nkUInt64Lit,
+                  nkFloatLit..nkFloat128Lit, nkStrLit..nkTripleStrLit, nkNilLit, nkEmpty}:
+      return
+    for i in 0..<n.safeLen:
+      if n[i].isNil:
+        continue
+      if n[i].kind == nkAliasCall:
+        # Convert nkAliasCall to nkCall with the renamed proc
+        let aliasCall = n[i]
+        let newCall = newNodeI(nkCall, aliasCall.info)
+        newCall.add(newIdentNode(newName, aliasCall.info))
+        for j in 0..<aliasCall.safeLen:
+          newCall.add(aliasCall[j])
+        n[i] = newCall
+      else:
+        rewriteAliasCallsInNode(n[i], newName)
+
+  # First pass: collect all alias defs and their target proc names
+  var aliasInfos: seq[tuple[idx: int, name: string, aliasDef: PNode]] = @[]
+  for i in 0..<stmts.len:
+    if stmts[i].kind == nkAliasDef and stmts[i].len > 0:
+      let innerProc = stmts[i][0]
+      let name = getProcName(innerProc)
+      if name != "":
+        aliasInfos.add((i, name, stmts[i]))
+
+  # Second pass: for each alias, find and rename the original, then transform
+  for info in aliasInfos:
+    let (aliasIdx, targetName, aliasDef) = info
+    let innerProc = aliasDef[0]
+    let aliasParams = getProcParams(innerProc)
+
+    # Find the most recent proc with this name (could be original or previous alias)
+    var foundIdx = -1
+    for i in countdown(aliasIdx - 1, 0):
+      let stmt = stmts[i]
+      if stmt.kind in {nkProcDef, nkFuncDef, nkMethodDef, nkIteratorDef,
+                       nkConverterDef, nkTemplateDef, nkMacroDef}:
+        if getProcName(stmt) == targetName:
+          if paramsMatch(getProcParams(stmt), aliasParams):
+            foundIdx = i
+            break
+
+    if foundIdx < 0:
+      # No matching proc found - this is an error
+      # For now, just skip (semantic pass will catch it)
+      continue
+
+    # Generate a unique name for the original proc
+    let renamedName = targetName & "__alias_" & $aliasCounter
+    inc aliasCounter
+    let renamedIdent = p.lex.cache.getIdent(renamedName)
+
+    # Rename the original proc
+    let origProc = stmts[foundIdx]
+    if origProc[0].kind == nkIdent:
+      origProc[0] = newIdentNode(renamedIdent, origProc[0].info)
+    elif origProc[0].kind == nkPostfix and origProc[0].len > 1:
+      if origProc[0][1].kind == nkIdent:
+        origProc[0][1] = newIdentNode(renamedIdent, origProc[0][1].info)
+
+    # Rewrite alias(...) calls in the inner proc body to use renamed proc
+    if innerProc.len > 6:  # body is at index 6
+      rewriteAliasCallsInNode(innerProc[6], renamedIdent)
+
+    # Replace the nkAliasDef with the inner proc (now a regular proc def)
+    stmts[aliasIdx] = innerProc
+
 proc parseAll*(p: var Parser): PNode =
   ## Parses the rest of the input stream held by the parser into a PNode.
   result = newNodeP(nkStmtList, p)
@@ -2631,6 +2781,8 @@ proc parseAll*(p: var Parser): PNode =
     if nextStmt.kind == nkEmpty:
       break
     result &= nextStmt
+  # Transform alias procs after parsing
+  transformAliasProcs(p, result)
   setEndInfo()
 
 proc parseString*(s: string; cache: IdentCache; config: ConfigRef;

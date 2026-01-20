@@ -116,6 +116,8 @@ type
     nkMacroDef,           # a macro
     nkTemplateDef,        # a template
     nkIteratorDef,        # an iterator
+    nkAliasDef,           # alias proc/func/method wrapper
+    nkAliasCall,          # alias(...) call inside alias proc
 
     nkOfBranch,           # used inside case statements
                           # for (cond, action)-pairs

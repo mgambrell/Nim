@@ -38,7 +38,7 @@ type
   TokType* = enum
     tkInvalid = "tkInvalid", tkEof = "[EOF]", # order is important here!
     tkSymbol = "tkSymbol", # keywords:
-    tkAddr = "addr", tkAnd = "and", tkAs = "as", tkAsm = "asm",
+    tkAddr = "addr", tkAlias = "alias", tkAnd = "and", tkAs = "as", tkAsm = "asm",
     tkBind = "bind", tkBlock = "block", tkBreak = "break", tkCase = "case", tkCast = "cast",
     tkConcept = "concept", tkConst = "const", tkContinue = "continue", tkConverter = "converter",
     tkDefer = "defer", tkDiscard = "discard", tkDistinct = "distinct", tkDiv = "div", tkDo = "do",

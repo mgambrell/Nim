@@ -16,7 +16,7 @@
 type
   TSpecialWord* = enum
     wInvalid = "",
-    wAddr = "addr", wAnd = "and", wAs = "as", wAsm = "asm",
+    wAddr = "addr", wAlias = "alias", wAnd = "and", wAs = "as", wAsm = "asm",
     wBind = "bind", wBlock = "block", wBreak = "break", wCase = "case", wCast = "cast",
     wConcept = "concept", wConst = "const", wContinue = "continue", wConverter = "converter",
     wDefer = "defer", wDiscard = "discard", wDistinct = "distinct", wDiv = "div", wDo = "do",

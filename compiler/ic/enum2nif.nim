@@ -89,6 +89,8 @@ proc toNifTag*(s: TNodeKind): string =
   of nkMacroDef: "macro"
   of nkTemplateDef: "template"
   of nkIteratorDef: "iterator"
+  of nkAliasDef: "aliasdef"
+  of nkAliasCall: "aliascall"
   of nkOfBranch: "of"
   of nkElifBranch: "elif"
   of nkExceptBranch: "except"
@@ -259,6 +261,8 @@ proc parse*(t: typedesc[TNodeKind]; s: string): TNodeKind =
   of "macro": nkMacroDef
   of "template": nkTemplateDef
   of "iterator": nkIteratorDef
+  of "aliasdef": nkAliasDef
+  of "aliascall": nkAliasCall
   of "of": nkOfBranch
   of "elif": nkElifBranch
   of "except": nkExceptBranch

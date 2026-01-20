@@ -196,6 +196,9 @@ proc processPipelineModule*(graph: ModuleGraph; module: PSym; idgen: IdGenerator
         if n.kind == nkEmpty: break
         sl.add n
 
+      # Transform alias procs before semantic analysis
+      transformAliasProcs(p, sl)
+
       prePass(ctx, sl)
       if sfReorder in module.flags or codeReordering in graph.config.features:
         sl = reorder(graph, sl, module)
