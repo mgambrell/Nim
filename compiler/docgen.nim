@@ -573,6 +573,9 @@ proc nodeToHighlightedHtml(d: PDoc; n: PNode; result: var string;
        tkBracketLeColon:
       dispA(d.conf, result, "<span class=\"Other\">$1</span>", "\\spanOther{$1}",
             [escLit])
+    of tkEmbeddedScript:
+      dispA(d.conf, result, "<span class=\"Comment\">$1</span>", "\\spanComment{$1}",
+            [escLit])
 
 proc exampleOutputDir(d: PDoc): AbsoluteDir = d.conf.getNimcacheDir / RelativeDir"runnableExamples"
 

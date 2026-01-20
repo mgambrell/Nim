@@ -198,6 +198,8 @@ proc processPipelineModule*(graph: ModuleGraph; module: PSym; idgen: IdGenerator
 
       # Transform alias procs before semantic analysis
       transformAliasProcs(p, sl)
+      # Transform embedded scripts
+      transformEmbeddedScripts(p, sl)
 
       prePass(ctx, sl)
       if sfReorder in module.flags or codeReordering in graph.config.features:

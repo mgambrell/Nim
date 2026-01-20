@@ -118,6 +118,7 @@ type
     nkIteratorDef,        # an iterator
     nkAliasDef,           # alias proc/func/method wrapper
     nkAliasCall,          # alias(...) call inside alias proc
+    nkEmbeddedScript,     # #;lang ... #;end block
 
     nkOfBranch,           # used inside case statements
                           # for (cond, action)-pairs

@@ -74,7 +74,7 @@ type
     tkComma = ",", tkSemiColon = ";",
     tkColon = ":", tkColonColon = "::", tkEquals = "=",
     tkDot = ".", tkDotDot = "..", tkBracketLeColon = "[:",
-    tkOpr, tkComment, tkAccent = "`",
+    tkOpr, tkComment, tkEmbeddedScript, tkAccent = "`",
     # these are fake tokens used by renderer.nim
     tkSpaces, tkInfixOpr, tkPrefixOpr, tkPostfixOpr, tkHideableStart, tkHideableEnd
 
@@ -123,6 +123,8 @@ type
                               # needs so much look-ahead
     currLineIndent*: int
     braceMode*: bool          # true = brace syntax, false = indent syntax
+    pendingEmbeddedScript*: string  # content of pending #;lang ... #;end block
+    pendingScriptLang*: string      # language name of pending embedded script
     errorHandler*: ErrorHandler
     cache*: IdentCache
     when defined(nimsuggest):
@@ -1159,12 +1161,112 @@ proc skip(L: var Lexer, tok: var Token) =
           inc(dpos)
         if directive == "braces":
           L.braceMode = true
+          # skip rest of line as comment
+          while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+            inc(dpos)
+          pos = dpos
         elif directive == "indent":
           L.braceMode = false
-        # skip rest of line as comment
-        while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
-          inc(dpos)
-        pos = dpos
+          # skip rest of line as comment
+          while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+            inc(dpos)
+          pos = dpos
+        elif directive == "end":
+          # standalone #;end is an error if no script block is open - just skip
+          while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+            inc(dpos)
+          pos = dpos
+        elif directive.len > 0:
+          # embedded script block: #;langname ... #;end
+          # Set the indentation for this token based on current line indentation
+          if not L.braceMode:
+            tok.indent = L.currLineIndent
+          L.pendingScriptLang = directive
+          L.pendingEmbeddedScript = ""
+          # skip rest of this line (anything after #;langname)
+          while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+            inc(dpos)
+          # skip the newline and update line tracking
+          if L.buf[dpos] == CR:
+            inc(dpos)
+            if L.buf[dpos] == LF: inc(dpos)
+            inc(L.lineNumber)
+            L.lineStart = dpos
+          elif L.buf[dpos] == LF:
+            inc(dpos)
+            inc(L.lineNumber)
+            L.lineStart = dpos
+          # capture lines until #;end
+          while true:
+            # check for #;end at start of line (allowing leading whitespace)
+            var lineStartPos = dpos
+            while L.buf[dpos] in {' ', '\t'}:
+              inc(dpos)
+            if L.buf[dpos] == '#' and L.buf[dpos+1] == ';':
+              var endDir = ""
+              var epos = dpos + 2
+              while L.buf[epos] in SymChars:
+                endDir.add L.buf[epos]
+                inc(epos)
+              if endDir == "end":
+                # found #;end, skip rest of this line
+                while L.buf[epos] notin {CR, LF, nimlexbase.EndOfFile}:
+                  inc(epos)
+                # skip the newline after #;end and update line tracking
+                if L.buf[epos] == CR:
+                  inc(epos)
+                  if L.buf[epos] == LF: inc(epos)
+                  inc(L.lineNumber)
+                  L.lineStart = epos
+                elif L.buf[epos] == LF:
+                  inc(epos)
+                  inc(L.lineNumber)
+                  L.lineStart = epos
+                # Calculate indentation for the line after #;end
+                var afterIndent = 0
+                var afterPos = epos
+                while L.buf[afterPos] in {' ', '\t'}:
+                  if L.buf[afterPos] == ' ':
+                    inc afterIndent
+                  else:  # tab
+                    afterIndent = (afterIndent div 8 + 1) * 8  # tab stop every 8
+                  inc afterPos
+                L.indentAhead = afterIndent
+                L.currLineIndent = afterIndent
+                pos = epos
+                L.bufpos = pos
+                break
+              else:
+                # not #;end, include this line in content
+                dpos = lineStartPos
+            else:
+              dpos = lineStartPos
+            # capture this line
+            while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+              L.pendingEmbeddedScript.add L.buf[dpos]
+              inc(dpos)
+            L.pendingEmbeddedScript.add '\n'
+            # handle end of file
+            if L.buf[dpos] == nimlexbase.EndOfFile:
+              pos = dpos
+              L.bufpos = pos
+              break
+            # skip newline and update line tracking
+            if L.buf[dpos] == CR:
+              inc(dpos)
+              if L.buf[dpos] == LF: inc(dpos)
+              inc(L.lineNumber)
+              L.lineStart = dpos
+            elif L.buf[dpos] == LF:
+              inc(dpos)
+              inc(L.lineNumber)
+              L.lineStart = dpos
+          break  # exit skip loop to emit the embedded script token
+        else:
+          # empty directive #; - just skip
+          while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+            inc(dpos)
+          pos = dpos
       elif L.buf[pos+1] == '[':
         when defined(nimpretty):
           hasComment = true
@@ -1214,6 +1316,16 @@ proc rawGetTok*(L: var Lexer, tok: var Token) =
   else:
     tok.indent = -1
   skip(L, tok)
+  # check for pending embedded script from #;lang ... #;end block
+  if L.pendingScriptLang.len > 0:
+    tok.tokType = tkEmbeddedScript
+    tok.literal = L.pendingScriptLang & "\n" & L.pendingEmbeddedScript
+    tok.line = L.lineNumber
+    tok.col = getColNumber(L, L.bufpos)
+    L.pendingScriptLang = ""
+    L.pendingEmbeddedScript = ""
+    atTokenEnd()
+    return
   when defined(nimpretty):
     if tok.tokType == tkComment:
       L.indentAhead = L.currLineIndent

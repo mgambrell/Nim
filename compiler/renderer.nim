@@ -1667,6 +1667,14 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
     put(g, tkParLe, "(")
     gcomma(g, n, 0)
     put(g, tkParRi, ")")
+  of nkEmbeddedScript:
+    # embedded script block - render as comment showing original form
+    if n.len >= 2:
+      put(g, tkComment, "#;" & n[0].strVal)
+      gcoms(g)
+      put(g, tkComment, n[1].strVal)
+      gcoms(g)
+      put(g, tkComment, "#;end")
   of nkTypeSection:
     gsection(g, n, emptyContext, tkType, "type")
   of nkConstSection:
