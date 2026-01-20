@@ -943,6 +943,9 @@ proc primarySuffix(p: var Parser, r: PNode,
       # `foo ref` or `foo ptr`. Unfortunately, these two are also
       # used as infix operators for the memory regions feature and
       # the current parsing rules don't play well here.
+      # In brace mode, don't use command syntax - statements end at expression boundaries
+      if inBraceMode(p):
+        break
       let isDotLike2 = p.tok.isDotLike
       if isDotLike2 and p.lex.config.isDefined("nimPreviewDotLikeOps"):
         # synchronize with `tkDot` branch
@@ -2029,20 +2032,30 @@ proc parseSection(p: var Parser, kind: TNodeKind,
   result = newNodeP(kind, p)
   if kind != nkTypeSection: getTok(p)
   skipComment(p, result)
-  if realInd(p):
+  if realInd(p) or (inBraceMode(p) and p.tok.tokType in {tkSymbol, tkAccent, tkParLe}):
     withInd(p):
       skipComment(p, result)
       # progress guaranteed
-      while sameInd(p):
+      # In brace mode, we need to explicitly check for section-ending keywords
+      # since indentation can't tell us when the section is done
+      while sameInd(p) or (inBraceMode(p) and p.tok.indent < 0 and p.tok.tokType in {tkSymbol, tkAccent, tkParLe, tkComment}):
         case p.tok.tokType
         of tkSymbol, tkAccent, tkParLe:
           var a = defparser(p)
           skipComment(p, a)
           result.add(a)
+          if inBraceMode(p):
+            # In brace mode, only parse one definition per section keyword
+            # (like C: each var/let/const/type is a separate statement)
+            break
         of tkComment:
           var a = newCommentStmt(p)
           result.add(a)
         else:
+          # In brace mode, encountering a non-identifier token ends the section
+          # without an error (e.g., var/let/const/proc after a type section)
+          if inBraceMode(p):
+            break
           parMessage(p, errIdentifierExpected, p.tok)
           break
     if not result.hasSon: parMessage(p, errIdentifierExpected, p.tok)
@@ -2231,8 +2244,32 @@ proc parseObject(p: var Parser): PNode =
     result.add(p.emptyNode)
   if p.tok.tokType == tkComment:
     skipComment(p, result)
+  # In brace mode, check for { to start the object body
+  if inBraceMode(p) and p.tok.tokType == tkCurlyLe:
+    var recList = newNodeP(nkRecList, p)
+    getTok(p)  # consume {
+    while p.tok.tokType notin {tkCurlyRi, tkEof}:
+      if p.tok.tokType == tkSemiColon:
+        getTok(p)
+      elif p.tok.tokType in {tkSymbol, tkAccent}:
+        recList.add(parseIdentColonEquals(p, {withPragma}))
+      elif p.tok.tokType == tkCase:
+        recList.add(parseObjectCase(p))
+      elif p.tok.tokType == tkWhen:
+        recList.add(parseObjectWhen(p))
+      elif p.tok.tokType == tkNil:
+        recList.add(newNodeP(nkNilLit, p))
+        getTok(p)
+      elif p.tok.tokType == tkDiscard:
+        recList.add(newNodeP(nkNilLit, p))
+        getTok(p)
+      else:
+        parMessage(p, errIdentifierExpected, p.tok)
+        break
+    eat(p, tkCurlyRi)  # consume }
+    result.add(recList)
   # an initial IND{>} HAS to follow:
-  if not realInd(p):
+  elif not realInd(p):
     result.add(p.emptyNode)
   else:
     result.add(parseObjectPart(p))

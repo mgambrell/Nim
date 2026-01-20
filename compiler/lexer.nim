@@ -1146,7 +1146,7 @@ proc skip(L: var Lexer, tok: var Token) =
         if L.buf[pos] == '#' and tok.line < 0: commentIndent = indent
       if L.buf[pos] > ' ' and (L.buf[pos] != '#' or L.buf[pos+1] == '#'):
         if L.braceMode:
-          tok.indent = 0  # signal newline but no indent tracking in brace mode
+          tok.indent = -1  # disable indent tracking in brace mode
         else:
           tok.indent = indent
           L.currLineIndent = indent
