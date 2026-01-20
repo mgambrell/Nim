@@ -2484,13 +2484,30 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
   of tkStatic: result = parseStaticOrDefer(p, nkStaticStmt)
   of tkDefer: result = parseStaticOrDefer(p, nkDefer)
   of tkAsm: result = parseAsm(p)
-  of tkProc: result = parseRoutine(p, nkProcDef)
-  of tkFunc: result = parseRoutine(p, nkFuncDef)
-  of tkMethod: result = parseRoutine(p, nkMethodDef)
-  of tkIterator: result = parseRoutine(p, nkIteratorDef)
-  of tkMacro: result = parseRoutine(p, nkMacroDef)
-  of tkTemplate: result = parseRoutine(p, nkTemplateDef)
-  of tkConverter: result = parseRoutine(p, nkConverterDef)
+  of tkProc, tkFunc, tkMethod, tkIterator, tkMacro, tkTemplate, tkConverter:
+    let routineKind = case p.tok.tokType
+      of tkProc: nkProcDef
+      of tkFunc: nkFuncDef
+      of tkMethod: nkMethodDef
+      of tkIterator: nkIteratorDef
+      of tkMacro: nkMacroDef
+      of tkTemplate: nkTemplateDef
+      of tkConverter: nkConverterDef
+      else: nkProcDef  # unreachable
+    let routine = parseRoutine(p, routineKind)
+    # Check if this proc is marked as a transformer
+    if p.lex.pendingTransformerName.len > 0:
+      result = newNodeP(nkTransformerDef, p)
+      # First child is the transformer name
+      var nameNode = newNodeP(nkStrLit, p)
+      nameNode.strVal = p.lex.pendingTransformerName
+      result.add(nameNode)
+      # Second child is the proc definition
+      result.add(routine)
+      p.lex.pendingTransformerName = ""
+      setEndInfo()
+    else:
+      result = routine
   of tkType:
     getTok(p)
     if p.tok.tokType == tkParLe:
@@ -2833,67 +2850,11 @@ proc transformAliasProcs*(p: var Parser, stmts: PNode) =
     stmts[aliasIdx] = innerProc
 
 proc transformEmbeddedScripts*(p: var Parser, stmts: PNode) =
-  ## Transform embedded script blocks:
-  ## 1. Find nkEmbeddedScript nodes
-  ## 2. Process based on language (currently only "repeat" is supported)
-  ## 3. Replace with generated Nim code
-
-  proc processRepeatScript(p: var Parser, content: string, info: TLineInfo): PNode =
-    ## Process #;repeat ... #;end script
-    ## Format: each line is "count text" where count is a number
-    ## Generates: echo "text" repeated count times
-    result = newNodeI(nkStmtList, info)
-    for line in content.splitLines():
-      let trimmed = line.strip()
-      if trimmed.len == 0:
-        continue
-      # Parse "count text"
-      var count = 0
-      var text = ""
-      var i = 0
-      # Parse the number
-      while i < trimmed.len and trimmed[i] in {'0'..'9'}:
-        count = count * 10 + (ord(trimmed[i]) - ord('0'))
-        inc i
-      # Skip whitespace
-      while i < trimmed.len and trimmed[i] in {' ', '\t'}:
-        inc i
-      # Rest is the text
-      text = trimmed[i..^1]
-      # Generate count echo statements
-      for j in 0..<count:
-        let echoCall = newNodeI(nkCall, info)
-        echoCall.add(newIdentNode(p.lex.cache.getIdent("echo"), info))
-        let strLit = newNodeI(nkStrLit, info)
-        strLit.strVal = text
-        echoCall.add(strLit)
-        result.add(echoCall)
-
-  # Process each statement, looking for embedded scripts
-  var i = 0
-  while i < stmts.len:
-    let stmt = stmts[i]
-    if stmt.kind == nkEmbeddedScript and stmt.len >= 2:
-      let langName = stmt[0].strVal
-      let content = stmt[1].strVal
-      if langName == "repeat":
-        let generated = processRepeatScript(p, content, stmt.info)
-        # Replace the embedded script node with generated statements
-        if generated.len == 0:
-          # No statements generated, replace with empty node
-          stmts[i] = newNodeI(nkEmpty, stmt.info)
-        elif generated.len == 1:
-          # Single statement, replace directly
-          stmts[i] = generated[0]
-        else:
-          # Multiple statements, need to splice them in
-          # Remove the nkEmbeddedScript and insert generated statements
-          stmts.sons.delete(i)
-          for j in 0..<generated.len:
-            stmts.sons.insert(generated[j], i + j)
-          i += generated.len - 1  # -1 because we'll inc i at end of loop
-      # else: unknown language, leave the node as-is for now
-    inc i
+  ## Placeholder for embedded script transformation during parsing.
+  ## User-defined transformers are now handled during semantic analysis
+  ## via the #;transformer(name) directive and nkTransformerDef node.
+  ## This function is kept for potential future built-in script processors.
+  discard
 
 proc parseAll*(p: var Parser): PNode =
   ## Parses the rest of the input stream held by the parser into a PNode.

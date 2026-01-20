@@ -92,6 +92,7 @@ proc toNifTag*(s: TNodeKind): string =
   of nkAliasDef: "aliasdef"
   of nkAliasCall: "aliascall"
   of nkEmbeddedScript: "embeddedscript"
+  of nkTransformerDef: "transformerdef"
   of nkOfBranch: "of"
   of nkElifBranch: "elif"
   of nkExceptBranch: "except"
@@ -265,6 +266,7 @@ proc parse*(t: typedesc[TNodeKind]; s: string): TNodeKind =
   of "aliasdef": nkAliasDef
   of "aliascall": nkAliasCall
   of "embeddedscript": nkEmbeddedScript
+  of "transformerdef": nkTransformerDef
   of "of": nkOfBranch
   of "elif": nkElifBranch
   of "except": nkExceptBranch

@@ -119,6 +119,7 @@ type
     nkAliasDef,           # alias proc/func/method wrapper
     nkAliasCall,          # alias(...) call inside alias proc
     nkEmbeddedScript,     # #;lang ... #;end block
+    nkTransformerDef,     # #;transformer(name) proc definition
 
     nkOfBranch,           # used inside case statements
                           # for (cond, action)-pairs

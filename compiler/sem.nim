@@ -18,7 +18,7 @@ import
   evaltempl, patterns, parampatterns, sempass2, linter, semmacrosanity,
   lowerings, plugins/active, lineinfos, int128,
   isolation_check, typeallowed, modulegraphs, enumtostr, concepts, astmsgs,
-  extccomp, layeredtable
+  extccomp, layeredtable, parser
 
 import vtables
 import std/[strtabs, math, tables, intsets, strutils, packedsets]

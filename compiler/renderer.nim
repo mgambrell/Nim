@@ -1675,6 +1675,12 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext, fromStmtList = false) =
       put(g, tkComment, n[1].strVal)
       gcoms(g)
       put(g, tkComment, "#;end")
+  of nkTransformerDef:
+    # transformer definition - render as #;transformer(name) followed by proc
+    if n.len >= 2:
+      put(g, tkComment, "#;transformer(" & n[0].strVal & ")")
+      gcoms(g)
+      gsub(g, n[1])  # render the proc definition
   of nkTypeSection:
     gsection(g, n, emptyContext, tkType, "type")
   of nkConstSection:

@@ -173,6 +173,7 @@ type
       # types that need to be updated in a type section
       # due to containing forward types, and their corresponding nodes
     inTypeofContext*: int
+    transformers*: Table[string, PSym]  # embedded script transformers by name
 
     semAsgnOpr*: proc (c: PContext; n: PNode; k: TNodeKind): PNode {.nimcall.}
 

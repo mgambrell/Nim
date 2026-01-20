@@ -101,6 +101,7 @@ proc nodeKindTranslation(k: TNodeKind): string =
   of nkAliasDef: "aliasdef"
   of nkAliasCall: "aliascall"
   of nkEmbeddedScript: "embeddedscript"
+  of nkTransformerDef: "transformerdef"
   of nkExceptBranch: "except"
   of nkTypeOfExpr: "typeof"
   of nkFinally: "fin"

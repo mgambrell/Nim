@@ -125,6 +125,7 @@ type
     braceMode*: bool          # true = brace syntax, false = indent syntax
     pendingEmbeddedScript*: string  # content of pending #;lang ... #;end block
     pendingScriptLang*: string      # language name of pending embedded script
+    pendingTransformerName*: string # name from #;transformer(name) directive
     errorHandler*: ErrorHandler
     cache*: IdentCache
     when defined(nimsuggest):
@@ -1176,11 +1177,35 @@ proc skip(L: var Lexer, tok: var Token) =
           while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
             inc(dpos)
           pos = dpos
+        elif directive == "transformer":
+          # #;transformer(name) - marks next proc as a transformer
+          # skip whitespace
+          while L.buf[dpos] in {' ', '\t'}:
+            inc(dpos)
+          # expect (
+          if L.buf[dpos] == '(':
+            inc(dpos)
+            # parse the name
+            var transformerName = ""
+            while L.buf[dpos] notin {')', CR, LF, nimlexbase.EndOfFile}:
+              transformerName.add L.buf[dpos]
+              inc(dpos)
+            # skip )
+            if L.buf[dpos] == ')':
+              inc(dpos)
+            L.pendingTransformerName = transformerName.strip()
+          # skip rest of line
+          while L.buf[dpos] notin {CR, LF, nimlexbase.EndOfFile}:
+            inc(dpos)
+          pos = dpos
         elif directive.len > 0:
           # embedded script block: #;langname ... #;end
-          # Set the indentation for this token based on current line indentation
+          # Calculate the actual indentation of the #; directive
+          # pos is at the # character, L.lineStart is at the beginning of the line
+          let actualIndent = pos - L.lineStart
           if not L.braceMode:
-            tok.indent = L.currLineIndent
+            tok.indent = actualIndent
+            L.currLineIndent = actualIndent
           L.pendingScriptLang = directive
           L.pendingEmbeddedScript = ""
           # skip rest of this line (anything after #;langname)

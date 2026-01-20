@@ -3633,6 +3633,58 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}, expectedType: PType 
     else:
       localError(c.config, n.info, "invalid context for 'bind' statement: " &
                 renderTree(n, {renderNoComments}))
+  of nkTransformerDef:
+    # #;transformer(name) proc definition
+    # n[0] = transformer name (nkStrLit)
+    # n[1] = proc definition
+    if n.len >= 2:
+      let transformerName = n[0].strVal
+      let procDef = n[1]
+      # Semantically analyze the proc
+      let semmedProc = semProc(c, procDef)
+      if semmedProc.kind == nkProcDef and semmedProc.len > 0 and semmedProc[namePos].kind == nkSym:
+        let procSym = semmedProc[namePos].sym
+        # Register the transformer
+        c.transformers[transformerName] = procSym
+      result = semmedProc
+    else:
+      localError(c.config, n.info, "malformed transformer definition")
+  of nkEmbeddedScript:
+    # #;langname ... #;end block
+    # n[0] = language name (nkStrLit)
+    # n[1] = content (nkStrLit)
+    if n.len >= 2:
+      let langName = n[0].strVal
+      let content = n[1].strVal
+      if langName in c.transformers:
+        let transformerSym = c.transformers[langName]
+        # Call the transformer via VM
+        # Create a call node: transformerSym(content)
+        var callNode = newNodeI(nkCall, n.info)
+        callNode.add(newSymNode(transformerSym, n.info))
+        var contentLit = newNodeI(nkStrLit, n.info)
+        contentLit.strVal = content
+        callNode.add(contentLit)
+        # Evaluate at compile time
+        let resultStr = c.semConstExpr(c, callNode)
+        if resultStr != nil and resultStr.kind in {nkStrLit..nkTripleStrLit}:
+          # Parse the result string as Nim code
+          let generatedCode = resultStr.strVal
+          var parsed = parseString(generatedCode, c.cache, c.config,
+                                   toFullPath(c.config, n.info), n.info.line.int)
+          # Semantically analyze the parsed code
+          if parsed.kind == nkStmtList:
+            result = newNodeI(nkStmtList, n.info)
+            for stmt in parsed:
+              result.add(semExpr(c, stmt, flags))
+          else:
+            result = semExpr(c, parsed, flags)
+        else:
+          localError(c.config, n.info, "transformer '" & langName & "' must return a string")
+      else:
+        localError(c.config, n.info, "no transformer registered for '" & langName & "'")
+    else:
+      localError(c.config, n.info, "malformed embedded script")
   else:
     localError(c.config, n.info, "invalid expression: " &
                renderTree(n, {renderNoComments}))
