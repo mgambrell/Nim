@@ -2485,6 +2485,12 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
   of tkDefer: result = parseStaticOrDefer(p, nkDefer)
   of tkAsm: result = parseAsm(p)
   of tkProc, tkFunc, tkMethod, tkIterator, tkMacro, tkTemplate, tkConverter:
+    # Capture pending flags BEFORE parsing routine, because parseRoutine calls
+    # getTok which may process #;directive pragmas further in the file
+    let pendingTransformer = p.lex.pendingTransformerName
+    let pendingAliasNow = p.lex.pendingAlias
+    p.lex.pendingTransformerName = ""
+    p.lex.pendingAlias = false
     let routineKind = case p.tok.tokType
       of tkProc: nkProcDef
       of tkFunc: nkFuncDef
@@ -2496,15 +2502,19 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
       else: nkProcDef  # unreachable
     let routine = parseRoutine(p, routineKind)
     # Check if this proc is marked as a transformer
-    if p.lex.pendingTransformerName.len > 0:
+    if pendingTransformer.len > 0:
       result = newNodeP(nkTransformerDef, p)
       # First child is the transformer name
       var nameNode = newNodeP(nkStrLit, p)
-      nameNode.strVal = p.lex.pendingTransformerName
+      nameNode.strVal = pendingTransformer
       result.add(nameNode)
       # Second child is the proc definition
       result.add(routine)
-      p.lex.pendingTransformerName = ""
+      setEndInfo()
+    # Check if this proc is marked as an alias
+    elif pendingAliasNow:
+      result = newNodeP(nkAliasDef, p)
+      result.add(routine)
       setEndInfo()
     else:
       result = routine
@@ -2532,40 +2542,9 @@ proc complexOrSimpleStmt(p: var Parser): PNode =
   of tkMixin: result = parseBind(p, nkMixinStmt)
   of tkUsing: result = parseSection(p, nkUsingStmt, parseVariable)
   of tkAlias:
-    # Peek ahead to see if this is 'alias proc/func/...' or 'alias(...)'
-    # Look at raw buffer: skip whitespace after 'alias' and check next word
-    var peekPos = p.lex.bufpos
-    while p.lex.buf[peekPos] in {' ', '\t'}:
-      inc peekPos
-    # Check if the next word starts a routine definition
-    let isAliasProc = (p.lex.buf[peekPos] == 'p' and p.lex.buf[peekPos+1] == 'r' and p.lex.buf[peekPos+2] == 'o' and p.lex.buf[peekPos+3] == 'c') or
-                      (p.lex.buf[peekPos] == 'f' and p.lex.buf[peekPos+1] == 'u' and p.lex.buf[peekPos+2] == 'n' and p.lex.buf[peekPos+3] == 'c') or
-                      (p.lex.buf[peekPos] == 'm' and p.lex.buf[peekPos+1] == 'e' and p.lex.buf[peekPos+2] == 't' and p.lex.buf[peekPos+3] == 'h') or
-                      (p.lex.buf[peekPos] == 'i' and p.lex.buf[peekPos+1] == 't' and p.lex.buf[peekPos+2] == 'e' and p.lex.buf[peekPos+3] == 'r') or
-                      (p.lex.buf[peekPos] == 'c' and p.lex.buf[peekPos+1] == 'o' and p.lex.buf[peekPos+2] == 'n' and p.lex.buf[peekPos+3] == 'v') or
-                      (p.lex.buf[peekPos] == 't' and p.lex.buf[peekPos+1] == 'e' and p.lex.buf[peekPos+2] == 'm' and p.lex.buf[peekPos+3] == 'p') or
-                      (p.lex.buf[peekPos] == 'm' and p.lex.buf[peekPos+1] == 'a' and p.lex.buf[peekPos+2] == 'c' and p.lex.buf[peekPos+3] == 'r')
-    if isAliasProc:
-      # alias proc/func/method/etc definition
-      result = newNodeP(nkAliasDef, p)
-      getTok(p)  # consume 'alias'
-      var inner: PNode = nil
-      case p.tok.tokType
-      of tkProc: inner = parseRoutine(p, nkProcDef)
-      of tkFunc: inner = parseRoutine(p, nkFuncDef)
-      of tkMethod: inner = parseRoutine(p, nkMethodDef)
-      of tkIterator: inner = parseRoutine(p, nkIteratorDef)
-      of tkConverter: inner = parseRoutine(p, nkConverterDef)
-      of tkTemplate: inner = parseRoutine(p, nkTemplateDef)
-      of tkMacro: inner = parseRoutine(p, nkMacroDef)
-      else:
-        parMessage(p, "expected 'proc', 'func', 'method', etc. after 'alias'")
-        return p.emptyNode
-      result.add(inner)
-      setEndInfo()
-    else:
-      # This is 'alias(...)' as an expression statement
-      result = simpleStmt(p)
+    # alias(...) call as a statement (inside an alias proc body)
+    # The 'alias proc' syntax is replaced by #;alias directive
+    result = simpleStmt(p)
   of tkEmbeddedScript:
     # Handle embedded script block from #;lang ... #;end
     result = newNodeP(nkEmbeddedScript, p)
