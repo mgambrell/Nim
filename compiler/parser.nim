@@ -2691,13 +2691,50 @@ proc transformAliasProcs*(p: var Parser, stmts: PNode) =
       return n[3]  # params are at index 3
     return nil
 
+  proc nodeStructureEqual(a, b: PNode): bool =
+    ## Compare two AST nodes structurally (for type comparison before sem)
+    if a.isNil and b.isNil: return true
+    if a.isNil or b.isNil: return false
+    if a.kind != b.kind: return false
+    case a.kind
+    of nkIdent:
+      return a.ident.s == b.ident.s
+    of nkSym:
+      return a.sym == b.sym
+    of nkCharLit..nkUInt64Lit:
+      return a.intVal == b.intVal
+    of nkFloatLit..nkFloat128Lit:
+      return a.floatVal == b.floatVal
+    of nkStrLit..nkTripleStrLit:
+      return a.strVal == b.strVal
+    else:
+      if a.safeLen != b.safeLen: return false
+      for i in 0..<a.safeLen:
+        if not nodeStructureEqual(a[i], b[i]): return false
+      return true
+
   proc paramsMatch(a, b: PNode): bool =
     ## Check if two formal param lists match (same types)
+    ## nkFormalParams: [0]=return type, [1..n]=nkIdentDefs
+    ## nkIdentDefs: [0..n-3]=names, [n-2]=type, [n-1]=default
     if a.isNil or b.isNil:
       return a.isNil and b.isNil
-    if a.len != b.len:
+    if a.safeLen != b.safeLen:
       return false
-    # For now, simple length check - full type matching would need sem
+    # Compare each param group's type (skip index 0 which is return type)
+    for i in 1..<a.safeLen:
+      let paramA = a[i]
+      let paramB = b[i]
+      if paramA.isNil or paramB.isNil:
+        if not (paramA.isNil and paramB.isNil): return false
+        continue
+      if paramA.safeLen != paramB.safeLen: return false
+      if paramA.safeLen < 2: continue
+      # Type is at index len-2
+      let typeA = paramA[paramA.len - 2]
+      let typeB = paramB[paramB.len - 2]
+      if not nodeStructureEqual(typeA, typeB):
+        return false
     return true
 
   proc rewriteAliasCallsInNode(n: PNode, newName: PIdent) =
