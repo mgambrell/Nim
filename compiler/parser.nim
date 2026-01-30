@@ -78,6 +78,8 @@ type
     bufposPrevious*: int
     inPragma*: int            # Pragma level
     inSemiStmtList*: int
+    inCaseBranch*: int        # Track if parsing case branch body (brace mode)
+    inCaseExpr*: int          # Track if parsing case condition expression (brace mode)
     when not defined(nimCustomAst):
       emptyNode: PNode
     when defined(nimpretty):
@@ -970,7 +972,12 @@ proc parseOperators(p: var Parser, headNode: PNode,
   let modeB = if mode == pmTypeDef: pmTypeDesc else: mode
   # the operator itself must not start on a new line:
   # progress guaranteed
-  while opPrec >= limit and p.tok.indent < 0 and not isUnary(p.tok):
+  # In brace mode case, stop at case-related keywords to allow inline case statements
+  # inCaseExpr stops at 'of' when parsing the case condition
+  # inCaseBranch stops at 'of'/'else'/'elif' when parsing branch bodies
+  while opPrec >= limit and p.tok.indent < 0 and not isUnary(p.tok) and
+        not (p.inCaseExpr > 0 and p.tok.tokType == tkOf) and
+        not (p.inCaseBranch > 0 and p.tok.tokType in {tkOf, tkElse, tkElif}):
     checkBinary(p)
     let leftAssoc = ord(not isRightAssociative(p.tok))
     var a = newNodeP(nkInfix, p)
@@ -1818,7 +1825,13 @@ proc parseCase(p: var Parser): PNode =
     wasIndented = false
   result = newNodeP(nkCaseStmt, p)
   getTok(p)
-  result.add(parseExpr(p))
+  # In brace mode, set inCaseExpr to stop expression parsing at 'of' keyword
+  if inBraceMode(p):
+    inc p.inCaseExpr
+    result.add(parseExpr(p))
+    dec p.inCaseExpr
+  else:
+    result.add(parseExpr(p))
   if p.tok.tokType == tkColon: getTok(p)
   skipComment(p, result)
 
@@ -1856,7 +1869,8 @@ proc parseCase(p: var Parser): PNode =
       p.currInd = p.tok.indent
       wasIndented = true
 
-    while sameInd(p):
+    # In brace mode, use sameOrNoInd to allow inline case branches (indent = -1)
+    while (if inBraceMode(p): sameOrNoInd(p) else: sameInd(p)):
       case p.tok.tokType
       of tkOf:
         if inElif: break
@@ -1873,7 +1887,14 @@ proc parseCase(p: var Parser): PNode =
         getTok(p)
       else: break
       colcom(p, b)
-      b.add(parseStmt(p))
+      # In brace mode inline case, track that we're in a case branch body
+      # so that parseOperators stops at of/else/elif keywords
+      if inBraceMode(p):
+        inc p.inCaseBranch
+        b.add(parseStmt(p))
+        dec p.inCaseBranch
+      else:
+        b.add(parseStmt(p))
       result.add(b)
       if b.kind == nkElse: break
 
