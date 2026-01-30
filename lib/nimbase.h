@@ -460,7 +460,11 @@ typedef double NF64;
 typedef double NF;
 
 typedef char NIM_CHAR;
+#ifdef _MSC_VER
+typedef const char* NCSTRING;  /* MSVC/clang-cl are strict about const */
+#else
 typedef char* NCSTRING;
+#endif
 
 #ifdef NIM_BIG_ENDIAN
 #  define NIM_IMAN 1
