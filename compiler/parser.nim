@@ -1127,6 +1127,17 @@ proc parseTuple(p: var Parser, indentAllowed = false): PNode =
       skipComment(p, a)
     optPar(p)
     eat(p, tkBracketRi)
+  # In brace mode, tuple can use { } to delimit fields
+  elif inBraceMode(p) and p.tok.tokType == tkCurlyLe:
+    getTok(p)  # consume {
+    while p.tok.tokType in {tkSymbol, tkAccent}:
+      var a = parseIdentColonEquals(p, {})
+      result.add(a)
+      if p.tok.tokType == tkComma or p.tok.tokType == tkSemiColon:
+        getTok(p)
+      elif p.tok.tokType != tkCurlyRi:
+        break
+    eat(p, tkCurlyRi)  # consume }
   elif indentAllowed:
     skipComment(p, result)
     if realInd(p):
@@ -1616,7 +1627,8 @@ proc parseExprStmt(p: var Parser): PNode =
     var isFirstParam = false
     # if an expression is starting here, a simplePrimary was parsed and
     # this is the start of a command
-    if p.tok.indent < 0 and isExprStart(p):
+    # In brace mode, don't use command syntax - each statement is self-contained
+    if not inBraceMode(p) and p.tok.indent < 0 and isExprStart(p):
       result = newTree(nkCommand, a.info, a)
       let baseIndent = p.currInd
       while true:
@@ -1810,34 +1822,63 @@ proc parseCase(p: var Parser): PNode =
   if p.tok.tokType == tkColon: getTok(p)
   skipComment(p, result)
 
-  let oldInd = p.currInd
-  if realInd(p):
-    p.currInd = p.tok.indent
-    wasIndented = true
+  # In brace mode, case can use { } to delimit branches
+  if inBraceMode(p) and p.tok.tokType == tkCurlyLe:
+    getTok(p)  # consume {
+    while p.tok.tokType notin {tkCurlyRi, tkEof}:
+      case p.tok.tokType
+      of tkOf:
+        if inElif: break
+        b = newNodeP(nkOfBranch, p)
+        exprList(p, tkCurlyLe, b)  # parse until { instead of :
+      of tkElif:
+        inElif = true
+        b = newNodeP(nkElifBranch, p)
+        getTok(p)
+        optInd(p, b)
+        b.add(parseExpr(p))
+      of tkElse:
+        b = newNodeP(nkElse, p)
+        getTok(p)
+      else: break
+      # In brace mode, expect { for branch body
+      if p.tok.tokType == tkCurlyLe:
+        b.add(parseBraceBlock(p))
+      else:
+        colcom(p, b)
+        b.add(parseStmt(p))
+      result.add(b)
+      if b.kind == nkElse: break
+    eat(p, tkCurlyRi)  # consume }
+  else:
+    let oldInd = p.currInd
+    if realInd(p):
+      p.currInd = p.tok.indent
+      wasIndented = true
 
-  while sameInd(p):
-    case p.tok.tokType
-    of tkOf:
-      if inElif: break
-      b = newNodeP(nkOfBranch, p)
-      exprList(p, tkColon, b)
-    of tkElif:
-      inElif = true
-      b = newNodeP(nkElifBranch, p)
-      getTok(p)
-      optInd(p, b)
-      b.add(parseExpr(p))
-    of tkElse:
-      b = newNodeP(nkElse, p)
-      getTok(p)
-    else: break
-    colcom(p, b)
-    b.add(parseStmt(p))
-    result.add(b)
-    if b.kind == nkElse: break
+    while sameInd(p):
+      case p.tok.tokType
+      of tkOf:
+        if inElif: break
+        b = newNodeP(nkOfBranch, p)
+        exprList(p, tkColon, b)
+      of tkElif:
+        inElif = true
+        b = newNodeP(nkElifBranch, p)
+        getTok(p)
+        optInd(p, b)
+        b.add(parseExpr(p))
+      of tkElse:
+        b = newNodeP(nkElse, p)
+        getTok(p)
+      else: break
+      colcom(p, b)
+      b.add(parseStmt(p))
+      result.add(b)
+      if b.kind == nkElse: break
 
-  if wasIndented:
-    p.currInd = oldInd
+    if wasIndented:
+      p.currInd = oldInd
   setEndInfo()
 
 proc parseTry(p: var Parser; isExpr: bool): PNode =
@@ -2071,44 +2112,75 @@ proc parseEnum(p: var Parser): PNode =
   result = newNodeP(nkEnumTy, p)
   getTok(p)
   result.add(p.emptyNode)
-  optInd(p, result)
-  flexComment(p, result)
-  # progress guaranteed
-  while true:
-    var a = parseSymbol(p)
-    if a.kind == nkEmpty: return
 
-    var symPragma = a
-    var pragma: PNode
-    if (p.tok.indent < 0 or p.tok.indent >= p.currInd) and p.tok.tokType == tkCurlyDotLe:
-      pragma = optPragmas(p)
-      symPragma = newNodeP(nkPragmaExpr, p)
-      symPragma.add(a)
-      symPragma.add(pragma)
-    # nimpretty support here
-    if p.tok.indent >= 0 and p.tok.indent <= p.currInd:
+  # In brace mode, enum can use { } to delimit values
+  if inBraceMode(p) and p.tok.tokType == tkCurlyLe:
+    getTok(p)  # consume {
+    while p.tok.tokType notin {tkCurlyRi, tkEof}:
+      var a = parseSymbol(p)
+      if a.kind == nkEmpty: break
+
+      var symPragma = a
+      if p.tok.tokType == tkCurlyDotLe:
+        var pragma = optPragmas(p)
+        symPragma = newNodeP(nkPragmaExpr, p)
+        symPragma.add(a)
+        symPragma.add(pragma)
+
+      if p.tok.tokType == tkEquals:
+        getTok(p)
+        optInd(p, symPragma)
+        var b = symPragma
+        symPragma = newNodeP(nkEnumFieldDef, p)
+        symPragma.add(b)
+        symPragma.add(parseExpr(p))
+
       result.add(symPragma)
-      break
 
-    if p.tok.tokType == tkEquals and p.tok.indent < 0:
-      getTok(p)
-      optInd(p, symPragma)
-      var b = symPragma
-      symPragma = newNodeP(nkEnumFieldDef, p)
-      symPragma.add(b)
-      symPragma.add(parseExpr(p))
-      if p.tok.indent < 0 or p.tok.indent >= p.currInd:
+      if p.tok.tokType == tkComma:
+        getTok(p)
+      elif p.tok.tokType != tkCurlyRi:
+        break
+    eat(p, tkCurlyRi)  # consume }
+  else:
+    optInd(p, result)
+    flexComment(p, result)
+    # progress guaranteed
+    while true:
+      var a = parseSymbol(p)
+      if a.kind == nkEmpty: return
+
+      var symPragma = a
+      var pragma: PNode
+      if (p.tok.indent < 0 or p.tok.indent >= p.currInd) and p.tok.tokType == tkCurlyDotLe:
+        pragma = optPragmas(p)
+        symPragma = newNodeP(nkPragmaExpr, p)
+        symPragma.add(a)
+        symPragma.add(pragma)
+      # nimpretty support here
+      if p.tok.indent >= 0 and p.tok.indent <= p.currInd:
+        result.add(symPragma)
+        break
+
+      if p.tok.tokType == tkEquals and p.tok.indent < 0:
+        getTok(p)
+        optInd(p, symPragma)
+        var b = symPragma
+        symPragma = newNodeP(nkEnumFieldDef, p)
+        symPragma.add(b)
+        symPragma.add(parseExpr(p))
+        if p.tok.indent < 0 or p.tok.indent >= p.currInd:
+          rawSkipComment(p, symPragma)
+      if p.tok.tokType == tkComma and p.tok.indent < 0:
+        getTok(p)
         rawSkipComment(p, symPragma)
-    if p.tok.tokType == tkComma and p.tok.indent < 0:
-      getTok(p)
-      rawSkipComment(p, symPragma)
-    else:
-      if p.tok.indent < 0 or p.tok.indent >= p.currInd:
-        rawSkipComment(p, symPragma)
-    result.add(symPragma)
-    if p.tok.indent >= 0 and p.tok.indent <= p.currInd or
-        p.tok.tokType == tkEof:
-      break
+      else:
+        if p.tok.indent < 0 or p.tok.indent >= p.currInd:
+          rawSkipComment(p, symPragma)
+      result.add(symPragma)
+      if p.tok.indent >= 0 and p.tok.indent <= p.currInd or
+          p.tok.tokType == tkEof:
+        break
   if not result.has2Sons:
     parMessage(p, errIdentifierExpected, p.tok)
   setEndInfo()
@@ -2151,7 +2223,7 @@ proc parseObjectCase(p: var Parser): PNode =
   getTok(p)
   if p.tok.tokType != tkOf:
     # of case will be handled later
-    if p.tok.indent >= 0: parMessage(p, errInvalidIndentation)
+    if not inBraceMode(p) and p.tok.indent >= 0: parMessage(p, errInvalidIndentation)
   var a: PNode
   if p.tok.tokType in {tkSymbol, tkAccent}:
     a = parseIdentColonEquals(p, {withPragma})
@@ -2169,32 +2241,77 @@ proc parseObjectCase(p: var Parser): PNode =
   result.add(a)
   if p.tok.tokType == tkColon: getTok(p)
   flexComment(p, result)
-  var wasIndented = false
-  let oldInd = p.currInd
-  if realInd(p):
-    p.currInd = p.tok.indent
-    wasIndented = true
-  # progress guaranteed
-  while sameInd(p):
-    var b: PNode
-    case p.tok.tokType
-    of tkOf:
-      b = newNodeP(nkOfBranch, p)
-      exprList(p, tkColon, b)
-    of tkElse:
-      b = newNodeP(nkElse, p)
-      getTok(p)
-    else: break
-    colcom(p, b)
-    var fields = parseObjectPart(p)
-    if fields.kind == nkEmpty:
-      parMessage(p, errIdentifierExpected, p.tok)
-      fields = newNodeP(nkNilLit, p) # don't break further semantic checking
-    b.add(fields)
-    result.add(b)
-    if b.kind == nkElse: break
-  if wasIndented:
-    p.currInd = oldInd
+
+  # In brace mode, case can use { } to delimit branches
+  if inBraceMode(p) and p.tok.tokType == tkCurlyLe:
+    getTok(p)  # consume {
+    while p.tok.tokType notin {tkCurlyRi, tkEof}:
+      var b: PNode
+      case p.tok.tokType
+      of tkOf:
+        b = newNodeP(nkOfBranch, p)
+        exprList(p, tkCurlyLe, b)  # parse until { instead of :
+      of tkElse:
+        b = newNodeP(nkElse, p)
+        getTok(p)
+      else: break
+      # Expect { for branch fields
+      if p.tok.tokType == tkCurlyLe:
+        var fieldList: seq[PNode] = @[]
+        getTok(p)  # consume {
+        while p.tok.tokType notin {tkCurlyRi, tkEof}:
+          if p.tok.tokType in {tkSymbol, tkAccent}:
+            fieldList.add(parseIdentColonEquals(p, {withPragma}))
+          elif p.tok.tokType == tkNil or p.tok.tokType == tkDiscard:
+            fieldList.add(newNodeP(nkNilLit, p))
+            getTok(p)
+          elif p.tok.tokType == tkSemiColon:
+            getTok(p)
+          else:
+            break
+        eat(p, tkCurlyRi)  # consume }
+        # Match indent mode: single field = nkIdentDefs directly, multiple = nkRecList
+        if fieldList.len == 1:
+          b.add(fieldList[0])
+        elif fieldList.len > 1:
+          var fields = newNodeP(nkRecList, p)
+          for f in fieldList:
+            fields.add(f)
+          b.add(fields)
+        else:
+          b.add(newNodeP(nkNilLit, p))
+      else:
+        b.add(newNodeP(nkNilLit, p))
+      result.add(b)
+      if b.kind == nkElse: break
+    eat(p, tkCurlyRi)  # consume }
+  else:
+    var wasIndented = false
+    let oldInd = p.currInd
+    if realInd(p):
+      p.currInd = p.tok.indent
+      wasIndented = true
+    # progress guaranteed
+    while sameInd(p):
+      var b: PNode
+      case p.tok.tokType
+      of tkOf:
+        b = newNodeP(nkOfBranch, p)
+        exprList(p, tkColon, b)
+      of tkElse:
+        b = newNodeP(nkElse, p)
+        getTok(p)
+      else: break
+      colcom(p, b)
+      var fields = parseObjectPart(p)
+      if fields.kind == nkEmpty:
+        parMessage(p, errIdentifierExpected, p.tok)
+        fields = newNodeP(nkNilLit, p) # don't break further semantic checking
+      b.add(fields)
+      result.add(b)
+      if b.kind == nkElse: break
+    if wasIndented:
+      p.currInd = oldInd
   setEndInfo()
 
 proc parseObjectPart(p: var Parser): PNode =
