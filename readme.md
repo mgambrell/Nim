@@ -2,16 +2,19 @@
 
 > **⚠️ UNOFFICIAL FORK** - This is an experimental, unofficial fork of the [Nim programming language](https://nim-lang.org/). For the official Nim compiler, visit [github.com/nim-lang/Nim](https://github.com/nim-lang/Nim).
 
-VOW adds experimental syntax extensions to Nim, primarily brace-delimited blocks as an alternative to indentation. This is a personal project and is not affiliated with or endorsed by the Nim team.
+VOW is intended to make Nim more accessible to developers coming from Ruby and JavaScript. It adds:
+
+- **Brace syntax** - Use `{}` for blocks instead of significant indentation, familiar to JS/C developers
+- **Aliases** - Wrap existing procs while preserving originals, enabling Ruby-style monkey patching
+- **Transformers** - Compile-time DSL processing, similar to Ruby's metaprogramming or JS build tooling
+
+The goal is to let developers use Nim as a high-performance replacement for Ruby/JS without fighting unfamiliar syntax or missing dynamic language conveniences.
+
+This is a personal project and is not affiliated with or endorsed by the Nim team.
 
 ## Overview
 
-VOW adds three major features via `#;` pragma directives:
-1. **Brace Syntax** - Use `{}` instead of indentation
-2. **Transformers** - Compile-time code generation from custom DSLs
-3. **Aliases** - Wrap/extend procs while preserving access to originals
-
-All features are implemented in the compiler's lexer (`compiler/lexer.nim`), parser (`compiler/parser.nim`), and semantic analysis (`compiler/semexprs.nim`).
+All features use `#;` pragma directives and are implemented in the compiler's lexer (`compiler/lexer.nim`), parser (`compiler/parser.nim`), and semantic analysis (`compiler/semexprs.nim`).
 
 ---
 
