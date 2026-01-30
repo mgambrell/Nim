@@ -945,28 +945,34 @@ proc findFile*(conf: ConfigRef; f: string; suppressStdlib = false): AbsoluteFile
 
 proc findModule*(conf: ConfigRef; modulename, currentModule: string): AbsoluteFile =
   # returns path to module
-  var m = addFileExt(modulename, NimExt)
+  # Try .vow first, then .nim (VOW extension)
+  const ModuleExts = ["vow", NimExt]
   var hasRelativeDot = false
-  if m.startsWith(pkgPrefix):
-    result = findFile(conf, m.substr(pkgPrefix.len), suppressStdlib = true)
-  else:
-    if m.startsWith(stdPrefix):
-      result = AbsoluteFile("")
-      let stripped = m.substr(stdPrefix.len)
-      for candidate in stdlibDirs:
-        let path = (conf.libpath.string / candidate / stripped)
-        if fileExists(path):
-          result = AbsoluteFile path
-          break
-    else: # If prefixed with std/ why would we add the current module path!
-      let currentPath = currentModule.splitFile.dir
-      result = AbsoluteFile currentPath / m
-      if m.startsWith('.') and not fileExists(result):
-        result = AbsoluteFile ""
-        hasRelativeDot = true
+  result = AbsoluteFile""
+  for ext in ModuleExts:
+    let m = addFileExt(modulename, ext)
+    if m.startsWith(pkgPrefix):
+      result = findFile(conf, m.substr(pkgPrefix.len), suppressStdlib = true)
+      if fileExists(result): break
+    else:
+      if m.startsWith(stdPrefix):
+        result = AbsoluteFile("")
+        let stripped = m.substr(stdPrefix.len)
+        for candidate in stdlibDirs:
+          let path = (conf.libpath.string / candidate / stripped)
+          if fileExists(path):
+            result = AbsoluteFile path
+            break
+      else: # If prefixed with std/ why would we add the current module path!
+        let currentPath = currentModule.splitFile.dir
+        result = AbsoluteFile currentPath / m
+        if m.startsWith('.') and not fileExists(result):
+          result = AbsoluteFile ""
+          hasRelativeDot = true
 
-    if not fileExists(result) and not hasRelativeDot:
-      result = findFile(conf, m)
+      if not fileExists(result) and not hasRelativeDot:
+        result = findFile(conf, m)
+      if fileExists(result): break
   patchModule(conf)
 
 proc findProjectNimFile*(conf: ConfigRef; pkg: string): string =

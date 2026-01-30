@@ -154,6 +154,11 @@ proc openParser*(p: var Parser, fileIdx: FileIndex, inputStream: PLLStream,
   ##
   reset(p.tok)
   openLexer(p.lex, fileIdx, inputStream, cache, config)
+  # Auto-enable brace mode for .vow files (must be before getTok!)
+  if config != nil and fileIdx.int32 >= 0:
+    let filename = toFilename(config, fileIdx)
+    if filename.endsWith(".vow"):
+      p.lex.braceMode = true
   when defined(nimpretty):
     openEmitter(p.em, cache, config, fileIdx)
   getTok(p)                   # read the first token
@@ -163,7 +168,20 @@ proc openParser*(p: var Parser, fileIdx: FileIndex, inputStream: PLLStream,
 
 proc openParser*(p: var Parser, filename: AbsoluteFile, inputStream: PLLStream,
                  cache: IdentCache; config: ConfigRef) =
-  openParser(p, fileInfoIdx(config, filename), inputStream, cache, config)
+  ## Open a parser with filename, auto-enabling brace mode for .vow files
+  let fileIdx = fileInfoIdx(config, filename)
+  reset(p.tok)
+  openLexer(p.lex, fileIdx, inputStream, cache, config)
+  # Auto-enable brace mode for .vow files (must be before getTok!)
+  let (_, _, ext) = splitFile(filename)
+  if ext == ".vow":
+    p.lex.braceMode = true
+  when defined(nimpretty):
+    openEmitter(p.em, cache, config, fileIdx)
+  getTok(p)                   # read the first token
+  p.firstTok = true
+  when not defined(nimCustomAst):
+    p.emptyNode = newNode(nkEmpty)
 
 proc closeParser*(p: var Parser) =
   ## Close a parser, freeing up its resources.
