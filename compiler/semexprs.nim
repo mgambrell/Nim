@@ -3633,6 +3633,140 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}, expectedType: PType 
     else:
       localError(c.config, n.info, "invalid context for 'bind' statement: " &
                 renderTree(n, {renderNoComments}))
+  of nkAliasDef:
+    # #;alias(name) proc definition - monkey-patching pattern
+    # The original proc's BODY is replaced with the plugin's code.
+    # A copy of the original is created under the alias name.
+    # This ensures existing call sites (already bound to original symbol) get the new behavior.
+    #
+    # n[0] = alias name for original (nkStrLit)
+    # n[1] = new proc definition
+    if n.len >= 2:
+      let aliasName = n[0].strVal
+      let procDef = n[1]
+
+      # Get the target proc name from the proc def
+      var targetName = ""
+      if procDef.len > namePos:
+        if procDef[namePos].kind == nkIdent:
+          targetName = procDef[namePos].ident.s
+        elif procDef[namePos].kind == nkPostfix and procDef[namePos].len > 1:
+          if procDef[namePos][1].kind == nkIdent:
+            targetName = procDef[namePos][1].ident.s
+
+      # Get first parameter type name from procDef to match overloads
+      var firstParamTypeName = ""
+      if procDef.len > paramsPos and procDef[paramsPos].kind == nkFormalParams:
+        let params = procDef[paramsPos]
+        if params.len > 1 and params[1].kind == nkIdentDefs and params[1].len > 1:
+          # params[1] = first param group, [len-2] = type
+          let typeNode = params[1][params[1].len - 2]
+          if typeNode.kind == nkIdent:
+            firstParamTypeName = typeNode.ident.s
+
+      if targetName != "" and aliasName != "":
+        # Look up ALL procs with this name to find the right overload
+        let targetIdent = c.cache.getIdent(targetName)
+        let candidates = searchScopesAll(c, targetIdent, {skProc, skFunc, skMethod, skIterator, skConverter, skTemplate, skMacro})
+
+        # Helper to get type name from a PType
+        proc getTypeName(t: PType): string =
+          if t == nil: return ""
+          # Check direct sym first
+          if t.sym != nil:
+            return t.sym.name.s
+          # For ref types, check the base type
+          if t.kind == tyRef and t.len > 0 and t[0] != nil:
+            if t[0].sym != nil:
+              return t[0].sym.name.s
+          # For aliases/distinct, check base
+          if t.kind in {tyAlias, tyDistinct} and t.len > 0 and t[0] != nil:
+            return getTypeName(t[0])
+          return ""
+
+        var originalSym: PSym = nil
+        for candidate in candidates:
+          # Match by first parameter type if we have one
+          if firstParamTypeName != "":
+            if candidate.typ != nil and candidate.typ.len > 1:
+              let paramType = candidate.typ[1]
+              let paramTypeName = getTypeName(paramType)
+              if paramTypeName == firstParamTypeName:
+                originalSym = candidate
+                break
+          else:
+            # No param type to match, take first candidate
+            originalSym = candidate
+            break
+
+        if originalSym != nil:
+          # Create a COPY of the original proc under the alias name
+          # This allows the plugin to call the original via the alias
+          let aliasIdent = c.cache.getIdent(aliasName)
+          var aliasSym = copySym(originalSym, c.idgen)
+          aliasSym.name = aliasIdent
+          aliasSym.flags = aliasSym.flags - {sfExported, sfUsed, sfMainModule}
+          if aliasSym.ast != nil:
+            aliasSym.ast = copyTree(aliasSym.ast)
+            if aliasSym.ast.len > namePos:
+              if aliasSym.ast[namePos].kind == nkIdent:
+                aliasSym.ast[namePos] = newIdentNode(aliasIdent, aliasSym.ast[namePos].info)
+              elif aliasSym.ast[namePos].kind == nkPostfix and aliasSym.ast[namePos].len > 1:
+                aliasSym.ast[namePos][1] = newIdentNode(aliasIdent, aliasSym.ast[namePos][1].info)
+              elif aliasSym.ast[namePos].kind == nkSym:
+                aliasSym.ast[namePos] = newSymNode(aliasSym, aliasSym.ast[namePos].info)
+          # Add the alias to the current scope
+          addInterfaceDecl(c, aliasSym)
+
+          # Analyze plugin's body in the context of the original proc
+          # by opening a new scope with the original's parameters
+          if procDef.len > bodyPos and originalSym.ast != nil and originalSym.ast.len > bodyPos:
+            let pluginBody = procDef[bodyPos]
+
+            # Open the original proc's scope so params are visible
+            openScope(c)
+
+            # Add original proc's parameters to the scope
+            if originalSym.typ != nil:
+              for i in 1 ..< originalSym.typ.n.len:
+                let param = originalSym.typ.n[i]
+                if param.kind == nkSym:
+                  addDecl(c, param.sym)
+
+            # Also add result variable if present
+            if originalSym.typ != nil and originalSym.typ[0] != nil:
+              if originalSym.ast.len > resultPos and originalSym.ast[resultPos].kind == nkSym:
+                addDecl(c, originalSym.ast[resultPos].sym)
+
+            # Set up proc context
+            let oldP = c.p
+            c.p = PProcCon(owner: originalSym, next: c.p)
+            # Set result symbol if the original proc has one
+            if originalSym.ast.len > resultPos and originalSym.ast[resultPos].kind == nkSym:
+              c.p.resultSym = originalSym.ast[resultPos].sym
+
+            # Semantically analyze the plugin's body
+            var newBody = semExprBranch(c, pluginBody)
+            if newBody.typ == nil or newBody.typ.kind == tyError:
+              # Try as statement list
+              newBody = semStmt(c, pluginBody, {})
+
+            # Restore context
+            c.p = oldP
+            closeScope(c)
+
+            # Replace the original proc's body
+            originalSym.ast[bodyPos] = newBody
+
+          # Return empty - we've patched the original, no new node needed
+          result = newNodeI(nkEmpty, n.info)
+        else:
+          localError(c.config, n.info, "cannot find proc '" & targetName & "' to create alias '" & aliasName & "'")
+          result = newNodeI(nkEmpty, n.info)
+      else:
+        result = semProc(c, procDef)
+    else:
+      localError(c.config, n.info, "malformed alias definition")
   of nkTransformerDef:
     # #;transformer(name) proc definition
     # n[0] = transformer name (nkStrLit)

@@ -16,7 +16,13 @@ import
   commands, magicsys, modulegraphs, lineinfos, wordrecg
 
 import std/[strutils, math, strtabs]
-#from system/memory import nimCStrLen
+# Local definition of nimCStrLen for bootstrapping compatibility
+proc nimCStrLen(a: cstring): int {.inline.} =
+  if a == nil: return 0
+  var i = 0
+  while a[i] != '\0':
+    inc i
+  result = i
 
 when defined(nimPreviewSlimSystem):
   import std/[assertions, formatfloat]
