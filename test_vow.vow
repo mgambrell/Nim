@@ -1,0 +1,336 @@
+# VOW (Voided Our Warranty) - Consolidated Test File
+# Tests brace syntax - .vow files automatically start in brace mode!
+
+# ============================================================
+# PART 1: Brace Syntax (automatic for .vow files!)
+# ============================================================
+
+# No #;braces needed - .vow files start in brace mode
+
+proc testBraceIf(name: string) = {
+  if name == "" {
+    echo("Hello, stranger!")
+  } else {
+    echo("Hello, " & name)
+  }
+}
+
+proc testBraceWhile() = {
+  var i = 0
+  while i < 3 {
+    echo("while i = " & $i)
+    i = i + 1
+  }
+}
+
+proc testBraceFor() = {
+  for i in 0..2 {
+    echo("for i = " & $i)
+  }
+}
+
+# For loop with complex range expression
+proc testBraceForComplex() = {
+  let a = 5
+  let b = 3
+  for i in 0 ..< min(a, b) {
+    echo("complex for i = " & $i)
+  }
+}
+
+proc testBraceNested() = {
+  if true {
+    if true {
+      echo("deeply nested braces")
+    }
+  }
+}
+
+# Test addr with function call syntax (addr(x) not addr x)
+proc takesPtr(p: ptr int) = {
+  echo("addr test: ", p[])
+}
+
+proc testBraceAddr() = {
+  var x = 99
+  takesPtr(addr(x))
+}
+
+proc testSetLiteral() = {
+  # Set literals still work in brace mode
+  let s = {1, 2, 3}
+  echo("set: ", s)
+}
+
+proc testOptionalColon() = {
+  # Both styles work
+  if true {
+    echo("no colon before brace")
+  }
+  if true: {
+    echo("with colon before brace")
+  }
+}
+
+# Type definitions with braces
+type Person = object {
+  name: string
+  age: int
+}
+
+proc testBraceType() = {
+  var p = Person(name: "Alice", age: 30)
+  echo("brace type: ", p.name, " is ", p.age)
+}
+
+# Enum with braces
+type Color = enum { Red, Green, Blue }
+
+proc testBraceEnum() = {
+  var c = Green
+  echo("brace enum: ", c)
+}
+
+# Tuple with braces
+type Point = tuple { x: int; y: int }
+
+proc testBraceTuple() = {
+  var pt: Point = (x: 10, y: 20)
+  echo("brace tuple: ", pt.x, ", ", pt.y)
+}
+
+# Case statement with braces around body
+proc testBraceCase(n: int) = {
+  case n {
+    of 1 { echo("case: one") }
+    of 2 { echo("case: two") }
+    else { echo("case: other") }
+  }
+}
+
+# Inline case statement (no braces around case body, just around proc body)
+proc testInlineCaseElse(d: int): string = {
+  case d of 2: return "down" of 4: return "left" of 6: return "right" of 8: return "up" else: return "none"
+}
+
+# Inline case with single of and else on same line
+proc testInlineCaseSimple(n: int): string = {
+  case n of 1: return "one" else: return "other"
+}
+
+# Object variant with braces
+type NodeKind = enum { nkInt, nkStr }
+type Node = object {
+  case kind: NodeKind {
+    of nkInt { intVal: int }
+    of nkStr { strVal: string }
+  }
+}
+
+proc testBraceVariant() = {
+  var n1 = Node(kind: nkInt, intVal: 42)
+  var n2 = Node(kind: nkStr, strVal: "hello")
+  echo("variant int: ", n1.intVal)
+  echo("variant str: ", n2.strVal)
+}
+
+# Test mode switching (can still use #;indent to switch to indent mode)
+#;indent
+
+proc testIndentMode() =
+  # Back to indent mode
+  if true:
+    echo "indent mode works"
+  for i in 0..1:
+    echo "indent loop: " & $i
+
+#;braces
+
+proc testBracesAgain() = {
+  echo("can switch back to braces")
+}
+
+# ============================================================
+# PART 2: Alias Tests (in brace mode)
+# ============================================================
+
+# Original proc to be aliased
+proc greet(name: string) = {
+  echo("Original: Hello, " & name)
+}
+
+# First alias - wrap the original
+#;alias(greetOriginal)
+proc greet(name: string) = {
+  echo("[before greet]")
+  greetOriginal(name)
+  echo("[after greet]")
+}
+
+# Test chained aliasing
+#;alias(greetV1)
+proc greet(name: string) = {
+  echo("=== START ===")
+  greetV1(name)
+  echo("=== END ===")
+}
+
+proc testAlias() = {
+  echo("Testing alias in brace mode:")
+  greet("World")
+  echo("")
+  echo("Calling intermediate alias directly:")
+  greetV1("Direct")
+  echo("")
+  echo("Calling original alias directly:")
+  greetOriginal("Original")
+}
+
+# Test alias with return value
+proc double(x: int): int = {
+  result = x * 2
+}
+
+#;alias(doubleOriginal)
+proc double(x: int): int = {
+  result = doubleOriginal(x) + 10
+}
+
+# Test alias with multiple params
+proc add(a, b: int): int = {
+  result = a + b
+}
+
+#;alias(addOriginal)
+proc add(a, b: int): int = {
+  echo("adding ", a, " + ", b)
+  result = addOriginal(a, b)
+}
+
+proc testAliasReturnValue() = {
+  echo("double(5) = ", double(5))  # Should be 5*2 + 10 = 20
+  echo("add(3, 4) = ", add(3, 4))  # Should print "adding..." and return 7
+}
+
+# Test single-line proc alias
+proc triple(x: int): int = { result = x * 3 }
+
+#;alias(tripleOriginal)
+proc triple(x: int): int = { result = tripleOriginal(x) + 100 }
+
+proc testSingleLineAlias() = {
+  echo("triple(5) = ", triple(5))  # Should be 5*3 + 100 = 115
+}
+
+# Test alias with comment between directive and proc
+proc quadruple(x: int): int = {
+  result = x * 4
+}
+
+#;alias(quadrupleOriginal)
+# This is a comment between the alias directive and the proc
+proc quadruple(x: int): int = {
+  result = quadrupleOriginal(x) + 1000
+}
+
+proc testAliasWithComment() = {
+  echo("quadruple(5) = ", quadruple(5))  # Should be 5*4 + 1000 = 1020
+}
+
+# Test alias with control flow in body
+proc checkValue(x: int): string = {
+  if x < 0 {
+    return "negative"
+  } elif x == 0 {
+    return "zero"
+  } else {
+    return "positive"
+  }
+}
+
+#;alias(checkValueOriginal)
+proc checkValue(x: int): string = {
+  echo("checking: ", x)
+  result = checkValueOriginal(x)
+  echo("result was: ", result)
+}
+
+proc testAliasControlFlow() = {
+  echo("checkValue(-5) = ", checkValue(-5))
+  echo("checkValue(0) = ", checkValue(0))
+  echo("checkValue(10) = ", checkValue(10))
+}
+
+# Test: code immediately after alias without blank line
+proc compute(x: int): int = {
+  result = x + 1
+}
+#;alias(computeOriginal)
+proc compute(x: int): int = {
+  result = computeOriginal(x) * 2
+}
+var computeTestVar = 42  # var immediately after aliased proc
+
+proc testAliasNoBlankLine() = {
+  echo("compute(5) = ", compute(5))  # Should be (5+1)*2 = 12
+  echo("computeTestVar = ", computeTestVar)
+}
+
+# Test rapid chaining - 3 aliases in a row with no blank lines
+proc rapidChain(x: int): int = { result = x }
+#;alias(rapidV0)
+proc rapidChain(x: int): int = { result = rapidV0(x) + 1 }
+#;alias(rapidV1)
+proc rapidChain(x: int): int = { result = rapidV1(x) + 10 }
+#;alias(rapidV2)
+proc rapidChain(x: int): int = { result = rapidV2(x) + 100 }
+
+proc testRapidChain() = {
+  echo("rapidChain(5) = ", rapidChain(5))  # Should be 5+1+10+100 = 116
+  echo("rapidV2(5) = ", rapidV2(5))  # Should be 5+1+10 = 16
+  echo("rapidV1(5) = ", rapidV1(5))  # Should be 5+1 = 6
+  echo("rapidV0(5) = ", rapidV0(5))  # Should be 5
+}
+
+# ============================================================
+# PART 3: Run All Tests
+# ============================================================
+
+echo("--- Brace Syntax Tests ---")
+testBraceIf("World")
+testBraceIf("")
+testBraceWhile()
+testBraceFor()
+testBraceForComplex()
+testBraceNested()
+testBraceAddr()
+testSetLiteral()
+testOptionalColon()
+testBraceType()
+testBraceEnum()
+testBraceTuple()
+testBraceCase(1)
+testBraceCase(2)
+testBraceCase(99)
+echo("inline case else: ", testInlineCaseElse(2))
+echo("inline case else: ", testInlineCaseElse(8))
+echo("inline case else: ", testInlineCaseElse(99))
+echo("inline case simple: ", testInlineCaseSimple(1))
+echo("inline case simple: ", testInlineCaseSimple(5))
+testBraceVariant()
+testIndentMode()
+testBracesAgain()
+
+echo("")
+echo("--- Alias Tests ---")
+testAlias()
+echo("")
+testAliasReturnValue()
+testSingleLineAlias()
+testAliasWithComment()
+testAliasControlFlow()
+testAliasNoBlankLine()
+testRapidChain()
+
+echo("")
+echo("--- All VOW tests complete! ---")
