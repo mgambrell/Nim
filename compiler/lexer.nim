@@ -1121,8 +1121,8 @@ proc skip(L: var Lexer, tok: var Token) =
       inc(pos)
       tok.spacing.incl(tsLeading)
     of '\t':
-      lexMessagePos(L, errGenerated, pos, "tabs are not allowed, use spaces instead")
       inc(pos)
+      tok.spacing.incl(tsLeading)
     of CR, LF:
       tokenEndPrevious(tok, pos)
       pos = handleCRLF(L, pos)
@@ -1131,6 +1131,9 @@ proc skip(L: var Lexer, tok: var Token) =
         if L.buf[pos] == ' ':
           inc(pos)
           inc(indent)
+        elif L.buf[pos] == '\t':
+          inc(pos)
+          inc(indent, 2)  # treat tab as 2 spaces for indent tracking
         elif L.buf[pos] == '#' and L.buf[pos+1] == '[':
           when defined(nimpretty):
             hasComment = true
