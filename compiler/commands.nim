@@ -24,7 +24,7 @@ bootSwitch(usedMarkAndSweep, defined(gcmarkandsweep), "--gc:markAndSweep")
 bootSwitch(usedGoGC, defined(gogc), "--gc:go")
 bootSwitch(usedNoGC, defined(nogc), "--gc:none")
 
-import std/[setutils, os, strutils, parseutils, parseopt, sequtils, strtabs, enumutils]
+import std/[setutils, os, strutils, parseutils, parseopt, sequtils, strtabs, enumutils, syncio]
 import
   msgs, options, nversion, condsyms, extccomp, platform,
   wordrecg, nimblecmd, lineinfos, pathutils
@@ -888,6 +888,15 @@ proc processSwitch*(switch, arg: string, pass: TCmdLinePass, info: TLineInfo;
   of "header":
     if conf != nil: conf.headerFile = arg
     incl(conf.globalOptions, optGenIndex)
+  of "cprefix":
+    expectArg(conf, switch, arg, pass, info)
+    if conf != nil:
+      var f: syncio.File = default(syncio.File)
+      if syncio.open(f, arg):
+        conf.cPrefixContent = syncio.readAll(f)
+        syncio.close(f)
+      else:
+        rawMessage(conf, errCannotOpenFile, arg)
   of "nimbasepattern":
     if conf != nil: conf.nimbasePattern = arg
   of "index":

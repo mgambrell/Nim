@@ -374,6 +374,7 @@ type
 
     cppDefines*: HashSet[string] # (*)
     headerFile*: string
+    cPrefixContent*: string # raw content to emit at top of every .c file
     nimbasePattern*: string # pattern to find nimbase.h
     features*: set[Feature]
     legacyFeatures*: set[LegacyFeature]

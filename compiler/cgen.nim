@@ -1649,7 +1649,11 @@ proc getCopyright(conf: ConfigRef; cfile: Cfile): Rope =
         rope(getCompileCFileCmd(conf, cfile))]
 
 proc getFileHeader(conf: ConfigRef; cfile: Cfile): Rope =
-  var res = newBuilder(getCopyright(conf, cfile))
+  var res = newBuilder("")
+  if conf.cPrefixContent.len > 0:
+    res.add(conf.cPrefixContent)
+    if conf.cPrefixContent[^1] != '\n': res.add("\L")
+  res.add(getCopyright(conf, cfile))
   if conf.hcrOn: res.add("#define NIM_HOT_CODE_RELOADING\L")
   addNimDefines(res, conf)
   result = extract(res)
