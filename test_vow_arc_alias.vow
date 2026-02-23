@@ -1,0 +1,14 @@
+# Alias override — in a DIFFERENT file from the original.
+# This simulates plugin_rg19_last.vow overriding impl_bitmap.vow.
+#
+# Because the original arcProcessValue is in a different file,
+# the parser's transformAliasProcs can't find it. The nkAliasDef
+# survives to the semantic-level handler in semexprs.nim, which
+# was missing pushOwner — causing all locals to become globals.
+
+#;alias(arcProcessValueOriginal)
+proc arcProcessValue(maxWidth: ArcTestObj, default: ArcTestObj): float = {
+  var maxWidth_m = maxWidth
+  maxWidth_m = arcOr(maxWidth_m, default)
+  result = maxWidth_m.val
+}

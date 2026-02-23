@@ -1,0 +1,42 @@
+# Main file that includes the original and alias from separate files.
+# This reproduces the actual VOW build pattern where impl_*.vow and
+# plugin_*.vow are include'd into main.vow.
+
+include "test_vow_arc_original.vow"
+include "test_vow_arc_alias.vow"
+
+proc testArcAliasScope() = {
+  echo("=== ARC Alias Scope Test (cross-file include) ===")
+  echo("Testing aliased proc with or-template across included files...")
+
+  # Call the aliased proc many times with different objects.
+  # Before the fix: orTmp gensym becomes a C global (sfGlobal set
+  # because nkAliasDef handler lacked pushOwner). eqdestroy without
+  # eqwasMoved leaves dangling pointer → use-after-free on next call.
+  for i in 1..50 {
+    let val = makeArcObj(float(i * 10))
+    let def = makeArcObj(999.0)
+    let r = arcProcessValue(val, def)
+    if int(r) != i * 10 {
+      echo("FAIL at i=", i, ": expected ", i*10, " got ", int(r))
+      quit(1)
+    }
+  }
+  echo("  PASS: 50 calls survived")
+
+  # Mixed truthy/falsy
+  for i in 0..20 {
+    let val = if i mod 3 == 0: makeArcObj(0.0) else: makeArcObj(float(i * 10))
+    let def = makeArcObj(777.0)
+    let r = arcProcessValue(val, def)
+    let expected = if i mod 3 == 0: 777.0 else: float(i * 10)
+    if r != expected {
+      echo("FAIL at i=", i, ": expected ", expected, " got ", r)
+      quit(1)
+    }
+  }
+  echo("  PASS: 21 mixed calls survived")
+  echo("=== ARC Alias Scope Test PASSED ===")
+}
+
+testArcAliasScope()

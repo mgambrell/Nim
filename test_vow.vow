@@ -293,6 +293,52 @@ proc testRapidChain() = {
 }
 
 # ============================================================
+# PART 2b: Alias ARC Scope Test (cross-file)
+# ============================================================
+# Regression test for use-after-free bug: the nkAliasDef sem handler
+# was missing pushOwner, so locals inside cross-file alias bodies
+# got sfGlobal (module scope). Template gensyms (e.g., orTmp from `or`)
+# became C globals — eqdestroy without eqwasMoved left dangling pointers.
+#
+# NOTE: Same-file aliases are handled by the parser-level transform
+# (transformAliasProcs) which converts them to regular nkProcDef nodes.
+# Only cross-file aliases (where the original is in an included file)
+# reach the sem-level nkAliasDef handler where the bug existed.
+#
+# The full cross-file test is in test_vow_arc_main.vow (includes
+# test_vow_arc_original.vow + test_vow_arc_alias.vow).
+# Here we just include them to run as part of the main test suite.
+
+include "test_vow_arc_original.vow"
+include "test_vow_arc_alias.vow"
+
+proc testAliasArcScope() = {
+  echo("Testing alias ARC scope (cross-file use-after-free regression):")
+  for i in 1..50 {
+    let val = makeArcObj(float(i * 10))
+    let def = makeArcObj(999.0)
+    let r = arcProcessValue(val, def)
+    if int(r) != i * 10 {
+      echo("FAIL at i=", i, ": expected ", i*10, " got ", int(r))
+      quit(1)
+    }
+  }
+  echo("  PASS: 50 calls to cross-file aliased proc survived")
+
+  for i in 0..20 {
+    let val = if i mod 3 == 0: makeArcObj(0.0) else: makeArcObj(float(i * 10))
+    let def = makeArcObj(777.0)
+    let r = arcProcessValue(val, def)
+    let expected = if i mod 3 == 0: 777.0 else: float(i * 10)
+    if r != expected {
+      echo("FAIL at i=", i, ": expected ", expected, " got ", r)
+      quit(1)
+    }
+  }
+  echo("  PASS: 21 mixed truthy/falsy calls survived")
+}
+
+# ============================================================
 # PART 3: Run All Tests
 # ============================================================
 
@@ -331,6 +377,10 @@ testAliasWithComment()
 testAliasControlFlow()
 testAliasNoBlankLine()
 testRapidChain()
+
+echo("")
+echo("--- Alias ARC Scope Tests ---")
+testAliasArcScope()
 
 echo("")
 echo("--- All VOW tests complete! ---")

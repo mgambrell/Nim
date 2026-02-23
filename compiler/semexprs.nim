@@ -3724,6 +3724,7 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}, expectedType: PType 
             let pluginBody = procDef[bodyPos]
 
             # Open the original proc's scope so params are visible
+            pushOwner(c, originalSym)
             openScope(c)
 
             # Add original proc's parameters to the scope
@@ -3754,6 +3755,7 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}, expectedType: PType 
             # Restore context
             c.p = oldP
             closeScope(c)
+            popOwner(c)
 
             # Replace the original proc's body
             originalSym.ast[bodyPos] = newBody

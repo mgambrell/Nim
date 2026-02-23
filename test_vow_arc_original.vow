@@ -1,0 +1,25 @@
+# Original proc — in a separate file from the alias override
+# This simulates how RMMZ class methods live in impl_*.vow
+# while plugin overrides live in plugin_*.vow
+
+type ArcTestObj = ref object {
+  val: float
+}
+
+proc toBoolArc(x: ArcTestObj): bool = { result = x != nil and x.val != 0.0 }
+
+template arcOr(a, b: untyped): untyped = {
+  (block: (let orTmp = a; if toBoolArc(orTmp): orTmp else: b))
+}
+
+proc makeArcObj(v: float): ArcTestObj = { result = ArcTestObj(val: v) }
+
+# This proc will be aliased from a different file.
+# Because the alias is in a different file, the parser-level
+# transformAliasProcs won't find this target, so the nkAliasDef
+# survives to semantic analysis where pushOwner was missing.
+proc arcProcessValue(maxWidth: ArcTestObj, default: ArcTestObj): float = {
+  var maxWidth_m = maxWidth
+  maxWidth_m = arcOr(maxWidth_m, default)
+  result = maxWidth_m.val
+}
