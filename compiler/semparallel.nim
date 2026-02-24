@@ -60,7 +60,7 @@ type
   TDirection = enum
     ascending, descending
   MonotonicVar = object
-    v, alias: PSym        # to support the ordinary 'countup' iterator
+    v, varAlias: PSym     # to support the ordinary 'countup' iterator
                           # we need to detect aliases
     lower, upper, stride: PNode
     dir: TDirection
@@ -86,7 +86,7 @@ proc initAnalysisCtx(g: ModuleGraph): AnalysisCtx =
 
 proc lookupSlot(c: AnalysisCtx; s: PSym): int =
   for i in 0..<c.locals.len:
-    if c.locals[i].v == s or c.locals[i].alias == s: return i
+    if c.locals[i].v == s or c.locals[i].varAlias == s: return i
   return -1
 
 proc getSlot(c: var AnalysisCtx; v: PSym): ptr MonotonicVar =
@@ -330,7 +330,7 @@ proc analyse(c: var AnalysisCtx; n: PNode) =
     let y = n[1].skipConv
     if n[0].isSingleAssignable and y.isLocal:
       let slot = c.getSlot(y.sym)
-      slot.alias = n[0].sym
+      slot.varAlias = n[0].sym
     elif n[0].isLocal:
       # since we already ensure sfAddrTaken is not in s.flags, we only need to
       # prevent direct assignments to the monotonic variable:

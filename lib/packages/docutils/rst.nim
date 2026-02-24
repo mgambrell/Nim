@@ -427,7 +427,7 @@ type
 
   PRstSharedState* = ref RstSharedState
   ManualAnchor = object
-    alias: string     # a (short) name that can substitute the `anchor`
+    rstAlias: string     # a (short) name that can substitute the `anchor`
     anchor: string    # anchor = id = refname
     info: TLineInfo
   RstParser = object of RootObj
@@ -842,7 +842,7 @@ proc addAnchorRst(p: var RstParser, name: string, target: PRstNode,
   ## alias `name` and updates the corresponding aliases in `p.curAnchors`.
   let prio = internalRefPriority(anchorType)
   for a in p.curAnchors:
-    p.s.anchors.mgetOrPut(a.alias, newSeq[AnchorSubst]()).add(
+    p.s.anchors.mgetOrPut(a.rstAlias, newSeq[AnchorSubst]()).add(
         AnchorSubst(kind: arInternalRst, target: target, priority: prio,
                     info: a.info, anchorType: manualDirectiveAnchor))
   if name != "":
@@ -3530,7 +3530,7 @@ proc parseDotDot(p: var RstParser): PRstNode =
     var b = untilEol(p)
     if len(b) == 0:  # set internal anchor
       p.curAnchors.add ManualAnchor(
-        alias: linkName(a), anchor: rstnodeToRefname(a), info: prevLineInfo(p)
+        rstAlias: linkName(a), anchor: rstnodeToRefname(a), info: prevLineInfo(p)
       )
     else:  # external hyperlink
       setRef(p, rstnodeToRefname(a), b, refType=hyperlinkAlias)
@@ -3657,13 +3657,13 @@ proc preparePass2*(s: var PRstSharedState, mainNode: PRstNode, importdoc = true)
 proc resolveLink(s: PRstSharedState, n: PRstNode) : PRstNode =
   # Associate this link alias with its target and change node kind to
   # rnHyperlink or rnInternalRef appropriately.
-  var desc, alias: PRstNode
+  var desc, rstAlias: PRstNode
   if n.kind == rnPandocRef:  # link like [desc][alias]
     desc = n.sons[0]
-    alias = n.sons[1]
+    rstAlias = n.sons[1]
   else:  # n.kind == rnRstRef, link like `desc=alias`_
     desc = n
-    alias = n
+    rstAlias = n
   type LinkDef = object
     ar: AnchorRule
     priority: int
@@ -3678,13 +3678,13 @@ proc resolveLink(s: PRstSharedState, n: PRstNode) : PRstNode =
     if result == 0:
       result = cmp(x.target, y.target)
   var foundLinks: seq[LinkDef]
-  let refn = rstnodeToRefname(alias)
+  let refn = rstnodeToRefname(rstAlias)
   var hyperlinks = findRef(s, refn)
   for y in hyperlinks:
     foundLinks.add LinkDef(ar: arHyperlink, priority: refPriority(y.kind),
                            target: y.value, info: y.info,
                            tooltip: "(" & $y.kind & ")")
-  let substRst = findMainAnchorRst(s, alias.addNodes, n.info)
+  let substRst = findMainAnchorRst(s, rstAlias.addNodes, n.info)
   template getExternFilename(subst: AnchorSubst): string =
     if subst.kind == arExternalRst or
         (subst.kind == arNim and subst.external):
@@ -3710,7 +3710,7 @@ proc resolveLink(s: PRstSharedState, n: PRstNode) : PRstNode =
                            tooltip: "(" & $anchorType & ")")
   # find anchors automatically generated from Nim symbols
   if roNimFile in s.options or s.nimFileImported:
-    let substNim = findMainAnchorNim(s, signature=alias, n.info)
+    let substNim = findMainAnchorNim(s, signature=rstAlias, n.info)
     for subst in substNim:
       let fullRefname =
         if subst.external:
@@ -3723,7 +3723,7 @@ proc resolveLink(s: PRstSharedState, n: PRstNode) : PRstNode =
                              isTitle: isDocumentationTitle(subst.refname),
                              info: subst.info, tooltip: subst.tooltip)
   foundLinks.sort(cmp = cmp, order = Descending)
-  let aliasStr = addNodes(alias)
+  let aliasStr = addNodes(rstAlias)
   if foundLinks.len >= 1:
     if foundLinks[0].externFilename != "":
       s.idxImports[foundLinks[0].externFilename].used = true

@@ -3706,8 +3706,8 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}, expectedType: PType 
           var aliasSym = copySym(originalSym, c.idgen)
           aliasSym.name = aliasIdent
           aliasSym.flags = aliasSym.flags - {sfExported, sfUsed, sfMainModule}
-          if aliasSym.ast != nil:
-            aliasSym.ast = copyTree(aliasSym.ast)
+          if originalSym.ast != nil:
+            aliasSym.ast = copyTree(originalSym.ast)
             if aliasSym.ast.len > namePos:
               if aliasSym.ast[namePos].kind == nkIdent:
                 aliasSym.ast[namePos] = newIdentNode(aliasIdent, aliasSym.ast[namePos].info)
@@ -3715,6 +3715,52 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}, expectedType: PType 
                 aliasSym.ast[namePos][1] = newIdentNode(aliasIdent, aliasSym.ast[namePos][1].info)
               elif aliasSym.ast[namePos].kind == nkSym:
                 aliasSym.ast[namePos] = newSymNode(aliasSym, aliasSym.ast[namePos].info)
+            # Fix symbol owners in the copied AST.
+            # copyTree shares symbols — it doesn't deep-copy them. All local
+            # symbols (params, result var, locals, gensym'd template vars) still
+            # reference originalSym as owner. We must create NEW symbol copies
+            # owned by aliasSym, otherwise lambda lifting sees mismatched owners
+            # and fails with "environment misses".
+            #
+            # For parameters: we create copies AND update the alias's type so
+            # the new param symbols are properly registered.
+            var symMap = initTable[int, PSym]()
+            # First, create new param symbols and update the alias type
+            if aliasSym.typ != nil and aliasSym.typ == originalSym.typ:
+              # Deep-copy the type so alias has its own param list
+              aliasSym.typ = copyType(aliasSym.typ, c.idgen, aliasSym)
+              if aliasSym.typ.n != nil:
+                aliasSym.typ.n = copyTree(aliasSym.typ.n)
+                for i in 0..<aliasSym.typ.n.len:
+                  let pn = aliasSym.typ.n[i]
+                  if pn.kind == nkSym and pn.sym.owner == originalSym:
+                    var newParam = copySym(pn.sym, c.idgen)
+                    setOwner(newParam, aliasSym)
+                    newParam.typ = pn.sym.typ
+                    symMap[pn.sym.id] = newParam
+                    aliasSym.typ.n[i] = newSymNode(newParam, pn.info)
+            # Also handle result sym in AST
+            if aliasSym.ast.len > resultPos and aliasSym.ast[resultPos].kind == nkSym:
+              let rs = aliasSym.ast[resultPos].sym
+              if rs.owner == originalSym:
+                var newRes = copySym(rs, c.idgen)
+                setOwner(newRes, aliasSym)
+                symMap[rs.id] = newRes
+                aliasSym.ast[resultPos] = newSymNode(newRes, aliasSym.ast[resultPos].info)
+            # Now reparent remaining symbols (locals, gensyms) in body
+            proc reparentSyms(n: PNode; fromOwner, toOwner: PSym; idgen: IdGenerator) =
+              if n == nil: return
+              if n.kind == nkSym:
+                let s = n.sym
+                if s.owner == fromOwner:
+                  if s.id notin symMap:
+                    var newSym = copySym(s, idgen)
+                    setOwner(newSym, toOwner)
+                    symMap[s.id] = newSym
+                  n.sym = symMap[s.id]
+              for i in 0..<n.safeLen:
+                reparentSyms(n[i], fromOwner, toOwner, idgen)
+            reparentSyms(aliasSym.ast, originalSym, aliasSym, c.idgen)
           # Add the alias to the current scope
           addInterfaceDecl(c, aliasSym)
 

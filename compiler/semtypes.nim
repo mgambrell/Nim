@@ -1820,8 +1820,8 @@ proc semTypeExpr(c: PContext, n: PNode; prev: PType): PType =
         # it has wild power to push a type a bit too far.
         # So we need to hold it back using alias and prevent
         # unnecessary new type creation
-        let alias = maybeAliasType(c, result, prev)
-        if alias != nil: result = alias
+        let typeAlias = maybeAliasType(c, result, prev)
+        if typeAlias != nil: result = typeAlias
   elif n.typ.kind == tyFromExpr and c.inGenericContext > 0:
     # sometimes not possible to distinguish type from value in generic body,
     # for example `T.Foo`, so both are handled under `tyFromExpr`
@@ -2289,8 +2289,8 @@ proc semTypeNode(c: PContext, n: PNode, prev: PType): PType =
         let preprocessed = semGenericStmt(c, n)
         result = makeTypeFromExpr(c, preprocessed.copyTree)
       else:
-        let alias = maybeAliasType(c, result, prev)
-        if alias != nil: result = alias
+        let typeAlias = maybeAliasType(c, result, prev)
+        if typeAlias != nil: result = typeAlias
   of nkIdent, nkAccQuoted:
     var s = semTypeIdent(c, n)
     if s.typ == nil:
@@ -2302,9 +2302,9 @@ proc semTypeNode(c: PContext, n: PNode, prev: PType): PType =
     elif prev == nil:
       result = s.typ
     else:
-      let alias = maybeAliasType(c, s.typ, prev)
-      if alias != nil:
-        result = alias
+      let typeAlias = maybeAliasType(c, s.typ, prev)
+      if typeAlias != nil:
+        result = typeAlias
       elif prev.kind == tyGenericBody:
         result = s.typ
       else:
@@ -2323,9 +2323,9 @@ proc semTypeNode(c: PContext, n: PNode, prev: PType): PType =
         else:
           internalAssert c.config, s.typ.base.kind != tyNone
           s.typ.base
-      let alias = maybeAliasType(c, t, prev)
-      if alias != nil:
-        result = alias
+      let typeAlias = maybeAliasType(c, t, prev)
+      if typeAlias != nil:
+        result = typeAlias
       elif prev == nil or prev.kind == tyGenericBody:
         result = t
       else:
