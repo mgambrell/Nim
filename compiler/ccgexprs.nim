@@ -3652,13 +3652,16 @@ proc expr(p: BProc, n: PNode, d: var TLoc) =
       p.s(cpsStmts).addDiscard(a.snippet)
   of nkAsmStmt: genAsmStmt(p, n)
   of nkTryStmt, nkHiddenTryStmt:
-    case p.config.exc
-    of excGoto:
-      genTryGoto(p, n, d)
-    of excCpp:
-      genTryCpp(p, n, d)
+    if optPanics in p.config.globalOptions and n.kind == nkHiddenTryStmt:
+      genTryPanics(p, n, d)
     else:
-      genTrySetjmp(p, n, d)
+      case p.config.exc
+      of excGoto:
+        genTryGoto(p, n, d)
+      of excCpp:
+        genTryCpp(p, n, d)
+      else:
+        genTrySetjmp(p, n, d)
   of nkRaiseStmt: genRaiseStmt(p, n)
   of nkTypeSection:
     # we have to emit the type information for object types here to support

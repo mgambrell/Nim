@@ -1576,6 +1576,19 @@ proc genTryGoto(p: BProc; t: PNode; d: var TLoc) =
   raiseExit(p)
   if hasExcept: inc p.withinTryWithExcept
 
+proc genTryPanics(p: BProc, t: PNode, d: var TLoc) =
+  # --panics:on with nkHiddenTryStmt (ARC-injected try/finally):
+  # Since panics abort the process, destructors don't need exception
+  # protection. Emit body + finally block sequentially, no setjmp.
+  if not isEmptyType(t.typ) and d.k == locNone:
+    d = getTemp(p, t.typ)
+  genLineDir(p, t)
+  # Emit the body (t[0])
+  expr(p, t[0], d)
+  # Emit the finally section (t[^1]) if present
+  if t[^1].kind == nkFinally:
+    genStmts(p, t[^1][0])
+
 proc genTrySetjmp(p: BProc, t: PNode, d: var TLoc) =
   # code to generate:
   #

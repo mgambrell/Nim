@@ -543,10 +543,10 @@ proc addProcHeader(builder: var Builder, m: BModule, prc: PSym, name: string, pa
   # with no body given
   # or enforce this with secondary builder object
   let noreturn = isNoReturn(m, prc)
-  if sfPure in prc.flags and hasDeclspec in extccomp.CC[m.config.cCompiler].props:
-    builder.add("__declspec(naked) ")
-  if noreturn and hasDeclspec in extccomp.CC[m.config.cCompiler].props:
-    builder.add("__declspec(noreturn) ")
+  if sfPure in prc.flags:
+    builder.add("NIM_NAKED ")
+  if noreturn:
+    builder.add("NIM_NORETURN ")
   builder.add(CallingConvToStr[prc.typ.callConv])
   builder.add("(")
   builder.add(rettype)
@@ -554,11 +554,6 @@ proc addProcHeader(builder: var Builder, m: BModule, prc: PSym, name: string, pa
   builder.add(name)
   builder.add(")")
   builder.add(params)
-  if addAttributes:
-    if sfPure in prc.flags and hasAttribute in extccomp.CC[m.config.cCompiler].props:
-      builder.add(" __attribute__((naked))")
-    if noreturn and hasAttribute in extccomp.CC[m.config.cCompiler].props:
-      builder.add(" __attribute__((noreturn))")
 
 proc finishProcHeaderAsProto(builder: var Builder) =
   builder.addLineEnd(";")
@@ -576,10 +571,10 @@ proc addProcVar(builder: var Builder, m: BModule, prc: PSym, name: string, param
     builder.add("static ")
   let noreturn = isNoReturn(m, prc)
   if not ignoreAttributes:
-    if sfPure in prc.flags and hasDeclspec in extccomp.CC[m.config.cCompiler].props:
-      builder.add("__declspec(naked) ")
-    if noreturn and hasDeclspec in extccomp.CC[m.config.cCompiler].props:
-      builder.add("__declspec(noreturn) ")
+    if sfPure in prc.flags:
+      builder.add("NIM_NAKED ")
+    if noreturn:
+      builder.add("NIM_NORETURN ")
   builder.add(CallingConvToStr[prc.typ.callConv])
   builder.add("_PTR(")
   builder.add(rettype)
@@ -587,11 +582,6 @@ proc addProcVar(builder: var Builder, m: BModule, prc: PSym, name: string, param
   builder.add(name)
   builder.add(")")
   builder.add(params)
-  if not ignoreAttributes:
-    if sfPure in prc.flags and hasAttribute in extccomp.CC[m.config.cCompiler].props:
-      builder.add(" __attribute__((naked))")
-    if noreturn and hasAttribute in extccomp.CC[m.config.cCompiler].props:
-      builder.add(" __attribute__((noreturn))")
   # ensure we are just adding a variable:
   builder.addLineEnd(";")
 
