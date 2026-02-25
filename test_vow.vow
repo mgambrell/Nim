@@ -166,6 +166,23 @@ proc testSemicolons() = {
   if a == 10 { b = 99 }; echo("after if-semicolon: b=", b)
 }
 
+# Pragmas in brace mode — {. .} must not be confused with block {
+{.push warning[UnusedImport]: off.}
+{.pop.}
+
+proc testPragmaInline(): int {.inline.} = {
+  result = 42
+}
+
+proc testPragmaNoSideEffect(x: int): int {.noSideEffect.} = {
+  result = x * 2
+}
+
+proc testPragmas() = {
+  echo("pragma inline: ", testPragmaInline())
+  echo("pragma noSideEffect: ", testPragmaNoSideEffect(21))
+}
+
 # ============================================================
 # PART 2: Alias Tests (in brace mode)
 # ============================================================
@@ -383,6 +400,7 @@ testBraceVariant()
 testIndentMode()
 testBracesAgain()
 testSemicolons()
+testPragmas()
 
 echo("")
 echo("--- Alias Tests ---")
