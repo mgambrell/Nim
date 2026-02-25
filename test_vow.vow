@@ -150,6 +150,22 @@ proc testBracesAgain() = {
   echo("can switch back to braces")
 }
 
+# Statement-separating semicolons in brace mode
+proc testSemicolons() = {
+  var a = 1; var b = 2; var c = 3
+  echo("semicolons: a=", a, " b=", b, " c=", c)
+  a = 10; b = 20
+  echo("semicolons reassign: a=", a, " b=", b)
+  # Trailing semicolons (should be harmless)
+  var d = 4;
+  echo("trailing semicolon: d=", d)
+  # Multiple semicolons between statements
+  var e = 5;; var f = 6
+  echo("double semicolon: e=", e, " f=", f)
+  # Semicolons with control flow on one line
+  if a == 10 { b = 99 }; echo("after if-semicolon: b=", b)
+}
+
 # ============================================================
 # PART 2: Alias Tests (in brace mode)
 # ============================================================
@@ -366,6 +382,7 @@ echo("inline case simple: ", testInlineCaseSimple(5))
 testBraceVariant()
 testIndentMode()
 testBracesAgain()
+testSemicolons()
 
 echo("")
 echo("--- Alias Tests ---")
