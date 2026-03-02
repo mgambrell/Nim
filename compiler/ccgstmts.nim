@@ -1580,14 +1580,26 @@ proc genTryPanics(p: BProc, t: PNode, d: var TLoc) =
   # --panics:on with nkHiddenTryStmt (ARC-injected try/finally):
   # Since panics abort the process, destructors don't need exception
   # protection. Emit body + finally block sequentially, no setjmp.
+  # We still register the finally with nestedTryStmts so that
+  # blockLeaveActions (called by return/break) emits destructors
+  # before goto BeforeRet_. Set noSafePoints during body emission
+  # to suppress popSafePoint/popCurrentException (we never pushed any).
+  let fin = if t[^1].kind == nkFinally: t[^1] else: nil
+  p.nestedTryStmts.add((fin, true, 0.Natural))
+  let hadNoSafePoints = noSafePoints in p.flags
+  incl p.flags, noSafePoints
   if not isEmptyType(t.typ) and d.k == locNone:
     d = getTemp(p, t.typ)
   genLineDir(p, t)
-  # Emit the body (t[0])
+  # Emit the body (t[0]) — any return/break inside will trigger
+  # blockLeaveActions which emits the finally cleanup before goto.
   expr(p, t[0], d)
-  # Emit the finally section (t[^1]) if present
-  if t[^1].kind == nkFinally:
-    genStmts(p, t[^1][0])
+  discard p.nestedTryStmts.pop
+  if not hadNoSafePoints:
+    excl p.flags, noSafePoints
+  # Emit the finally section for the normal (non-return) exit path
+  if fin != nil:
+    genStmts(p, fin[0])
 
 proc genTrySetjmp(p: BProc, t: PNode, d: var TLoc) =
   # code to generate:
