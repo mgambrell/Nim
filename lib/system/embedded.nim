@@ -18,6 +18,7 @@ proc nimFrame(s: PFrame) {.compilerRtl, inl, exportc: "nimFrame".} = discard
 proc popFrame {.compilerRtl, inl.} = discard
 
 proc setFrame(s: PFrame) {.compilerRtl, inl.} = discard
+proc getFrame*(): PFrame {.compilerRtl, inl.} = nil
 when not gotoBasedExceptions:
   proc pushSafePoint(s: PSafePoint) {.compilerRtl, inl.} = discard
   proc popSafePoint {.compilerRtl, inl.} = discard
@@ -56,15 +57,69 @@ const
 
 proc quitOrDebug() {.noreturn, importc: "abort", header: "<stdlib.h>", nodecl.}
 
-proc raiseExceptionAux(e: sink(ref Exception)) {.nodestroy.} =
-  pushCurrentException(e)
-  when gotoBasedExceptions:
-    inc nimInErrorMode
+# --- Unhandled-exception reporting -----------------------------------------
+# MBG SPECIAL MOD: exception handling is treated as a bug: a raise always terminates the program. 
+# No setjmp/longjmp unwinding, no goto-based, error flag, no catch.
+# That's what we're rolling with for now, though I may need to make it configurable later
+#
+# Two platform hooks (both registered from host at startup):
+#   mxrSetUnhandledExceptionLogger : receives a single fully-formatted cstring; expected to route to the engine's log stream.
+#   mxrSetUnhandledExceptionAbortHook : fires after the log call, in case you decided not to terminate from there.
 
-proc raiseExceptionEx(e: sink(ref Exception), ename, procname, filename: cstring,
-                      line: int) {.compilerRtl, nodestroy.} =
+type
+  MxrUnhandledExcLogger* = proc (msg: cstring) {.cdecl.}
+  MxrUnhandledExcAbortHook* = proc () {.cdecl.}
+
+var mxrUnhandledExcLogger: MxrUnhandledExcLogger
+var mxrUnhandledExcAbortHook: MxrUnhandledExcAbortHook
+
+proc mxrSetUnhandledExceptionLogger*(p: MxrUnhandledExcLogger) {.exportc, cdecl.} =
+  mxrUnhandledExcLogger = p
+
+proc mxrSetUnhandledExceptionAbortHook*(p: MxrUnhandledExcAbortHook) {.exportc, cdecl.} =
+  mxrUnhandledExcAbortHook = p
+
+proc c_snprintf(buf: cstring, size: csize_t, fmt: cstring) {.
+    importc: "snprintf", header: "<stdio.h>", varargs, discardable.}
+proc c_puts(s: cstring): cint {.importc: "puts", header: "<stdio.h>", discardable.}
+proc c_fflush(stream: pointer): cint {.importc: "fflush", header: "<stdio.h>", discardable.}
+
+proc fatalReport(e: ref Exception, procname, filename: cstring, line: int) {.nodestroy.} =
+  # Assemble the whole report into
+  var buf: array[2048, char]
+  var nameStr: cstring = "(unknown)".cstring
+  var msgStr: cstring = "".cstring
+  if e != nil:
+    if not e.name.isNil:
+      nameStr = e.name
+    if e.msg.len > 0:
+      msgStr = e.msg.cstring
+  let procStr: cstring = (if procname.isNil: "(?)".cstring else: procname)
+  let fileStr: cstring = (if filename.isNil: "(?)".cstring else: filename)
+  c_snprintf(cast[cstring](addr buf[0]), csize_t(sizeof(buf)),
+             "FATAL: unhandled exception\n  type: %s\n  msg:  %s\n  at:   %s (%s:%d)".cstring,
+             nameStr, msgStr, procStr, fileStr, line.cint)
+  if mxrUnhandledExcLogger != nil:
+    mxrUnhandledExcLogger(cast[cstring](addr buf[0]))
+  else:
+    discard c_puts(cast[cstring](addr buf[0]))
+  discard c_fflush(nil)
+
+proc fatalAbort() {.noreturn, nodestroy.} =
+  # Run the platform's pre-abort hook (callstack/__debugbreak/minidump/etc.)
+  # then terminate. The hook is expected to RETURN — abort happens here.
+  if mxrUnhandledExcAbortHook != nil:
+    mxrUnhandledExcAbortHook()
+  quitOrDebug()
+
+proc raiseExceptionAux(e: sink(ref Exception)) {.nodestroy.} =
+  fatalReport(e, nil, nil, 0)
+  fatalAbort()
+
+proc raiseExceptionEx(e: sink(ref Exception), ename, procname, filename: cstring, line: int) {.compilerRtl, nodestroy.} =
   if e.name.isNil: e.name = ename
-  raiseExceptionAux(e)
+  fatalReport(e, procname, filename, line)
+  fatalAbort()
 
 proc raiseException(e: sink(ref Exception), ename: cstring) {.compilerRtl.} =
   raiseExceptionEx(e, ename, nil, nil, 0)
@@ -73,10 +128,7 @@ proc reraiseException() {.compilerRtl.} =
   if currException == nil:
     sysFatal(ReraiseDefect, "no exception to reraise")
   else:
-    when gotoBasedExceptions:
-      inc nimInErrorMode
-    else:
-      raiseExceptionAux(currException)
+    raiseExceptionAux(currException)
 
 proc raiseDefect() {.compilerRtl.} =
   rawQuit(1)
