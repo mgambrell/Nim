@@ -20,8 +20,17 @@ proc popFrame {.compilerRtl, inl.} = discard
 proc setFrame(s: PFrame) {.compilerRtl, inl.} = discard
 proc getFrame*(): PFrame {.compilerRtl, inl.} = nil
 when not gotoBasedExceptions:
-  proc pushSafePoint(s: PSafePoint) {.compilerRtl, inl.} = discard
-  proc popSafePoint {.compilerRtl, inl.} = discard
+  var excHandler {.threadvar.}: PSafePoint
+    ## Stack of active setjmp safepoints — the root of all try blocks on this
+    ## thread. MBG: re-enabled so setjmp-exception builds (mv, gdevelop) can
+    ## actually catch. goto builds still treat raise as fatal (see below).
+
+  proc pushSafePoint(s: PSafePoint) {.compilerRtl, inl.} =
+    s.prev = excHandler
+    excHandler = s
+
+  proc popSafePoint {.compilerRtl, inl.} =
+    excHandler = excHandler.prev
 
 var currException {.threadvar.}: ref Exception
 
@@ -112,23 +121,33 @@ proc fatalAbort() {.noreturn, nodestroy.} =
     mxrUnhandledExcAbortHook()
   quitOrDebug()
 
-proc raiseExceptionAux(e: sink(ref Exception)) {.nodestroy.} =
-  fatalReport(e, nil, nil, 0)
+# MBG: setjmp-exception builds get real try/except unwinding (longjmp to the
+# nearest safepoint). Only when there is NO active handler does a raise fall
+# back to the original "exceptions are a bug" fatal report + abort. goto-based
+# builds keep the old behavior (raise is fatal via the error-flag path).
+proc raiseExceptionAux(e: sink(ref Exception), procname, filename: cstring, line: int) {.nodestroy.} =
+  when not gotoBasedExceptions:
+    if excHandler != nil:
+      if e != currException:
+        pushCurrentException(e)
+      c_longjmp(excHandler.context, 1)
+      return
+  fatalReport(e, procname, filename, line)
   fatalAbort()
 
 proc raiseExceptionEx(e: sink(ref Exception), ename, procname, filename: cstring, line: int) {.compilerRtl, nodestroy.} =
   if e.name.isNil: e.name = ename
-  fatalReport(e, procname, filename, line)
-  fatalAbort()
+  raiseExceptionAux(e, procname, filename, line)
 
 proc raiseException(e: sink(ref Exception), ename: cstring) {.compilerRtl.} =
   raiseExceptionEx(e, ename, nil, nil, 0)
 
 proc reraiseException() {.compilerRtl.} =
   if currException == nil:
-    sysFatal(ReraiseDefect, "no exception to reraise")
+    fatalReport(nil, "(reraise)".cstring, nil, 0)
+    fatalAbort()
   else:
-    raiseExceptionAux(currException)
+    raiseExceptionAux(currException, nil, nil, 0)
 
 proc raiseDefect() {.compilerRtl.} =
   rawQuit(1)
