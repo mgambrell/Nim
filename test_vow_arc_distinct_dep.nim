@@ -9,7 +9,17 @@
 #   bin/nim c -r --mm:arc test_vow_arc_distinct_dep.nim
 #
 # Behavior matrix (verified 2026-06-12):
-#   - stock 2.0.0 / 2.2.0 / 2.2.8:            ASSERT-CRASH
+#   - stock 1.2.18 / 1.4.8 (--gc:arc):         compiles but SILENTLY LEAKS —
+#       sink Key param body has no =destroy (48 B/iter, 9.6 MB / 200k calls;
+#       non-distinct control destroys properly). Pre-1.6 distincts were
+#       hook-invisible (Key(v) erased by transformConv), so "passing" there
+#       is the miscompile, not correctness.
+#   - stock 1.6.14 / 2.0.0 / 2.2.0 / 2.2.8:    ASSERT-CRASH — the leak became
+#       an ICE at fc9cf2088 ("Fix 16722" #16730, 2021-01-15, shipped 1.6.0),
+#       which made distincts hook-aware in transf/liftdestructors without
+#       teaching injectdestructors to resolve hooks for IMPORTED distinct
+#       instances (bisected over 1824 commits, 11 steps, 0 skips,
+#       parent 52cf72800 re-verified).
 #   - upstream devel tip b44d373 (2026-06-11): ASSERT-CRASH (arc AND orc)
 #   - this fork pre-b22b532f4:                 ASSERT-CRASH
 #       injectdestructors `not containsManagedMemory(nTyp)` (line 467 stock,
