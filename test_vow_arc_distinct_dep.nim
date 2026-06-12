@@ -1,42 +1,48 @@
-# KNOWN-FAILING (2026-06-12): cross-module `distinct` of a managed VALUE
-# variant loses its lifted ARC hooks. NOT wired into test_vow.vow — this file
-# documents an OPEN compiler bug; it becomes a real regression test the day
-# the bug is fixed. The whole repro is 16 + 2 lines of PURE STOCK NIM (no VOW
-# syntax) — see test_vow_arc_distinct_mod.nim for the ingredient list.
+# KNOWN-FAILING (2026-06-12): `distinct` of a managed VALUE object loses its
+# lifted ARC hooks at a cross-module lvalue-to-sink copy. NOT wired into
+# test_vow.vow — this documents an OPEN compiler bug; it becomes a real
+# regression test the day the bug is fixed. Pure stock Nim (no VOW syntax),
+# 11 + 2 lines, zero imports — see test_vow_arc_distinct_mod.nim for the
+# ingredient list.
 #
 # Run:
 #   bin/nim c -r --mm:arc test_vow_arc_distinct_dep.nim
 #
-# Behavior matrix (all verified 2026-06-12):
-#   - stock nim 2.0.0 / 2.2.0 / 2.2.8:        compiles, prints ok
-#   - UPSTREAM DEVEL TIP b44d373 (2026-06-11): ASSERT-CRASH, both --mm:arc
-#       AND --mm:orc (stock assert site is injectdestructors.nim:467; the
-#       fork's is 499 from local additions). Confirmed live upstream
-#       regression 2.2.8 -> devel, NOT an MBG-introduced bug (git history
-#       of liftdestructors/injectdestructors/modulegraphs in this fork is
-#       purely upstream merges; suspicion: the IC refactor line,
-#       #25282/#25344/#25427, which moved attached-op bookkeeping)
-#   - this fork, module compiled STANDALONE:   compiles clean (the trap)
-#   - this fork, pre-b22b532f4 binary:         compiler CRASH —
-#       injectdestructors.nim(499) `not containsManagedMemory(nTyp)` assert
-#   - this fork, source >= b22b532f4:          proper error at put() —
+# Behavior matrix (verified 2026-06-12):
+#   - stock 2.0.0 / 2.2.0 / 2.2.8:            ASSERT-CRASH
+#   - upstream devel tip b44d373 (2026-06-11): ASSERT-CRASH (arc AND orc)
+#   - this fork pre-b22b532f4:                 ASSERT-CRASH
+#       injectdestructors `not containsManagedMemory(nTyp)` (line 467 stock,
+#       499 fork)
+#   - this fork source >= b22b532f4:           proper error at put() —
 #       "passCopyToSink: type 'Key' contains managed memory but has no
 #        attached =destroy"
-#   - FIXED compiler:                          prints "ok", exit 0
+#   - module compiled STANDALONE, any compiler: clean (the trap: a library's
+#       own tests pass; the first importer dies)
+#   - FIXED compiler:                           prints "ok", exit 0
 #
-# Mechanism (diagnosed, not fixed): attached ops live in the ModuleGraph
-# keyed by PType itemId; sem only borrows base-type ops onto a distinct via
-# produceSymDistinctType when createTypeBoundOps reaches it, and for this
-# recursive-through-the-distinct shape the distinct's PType instance reaches
-# injectdestructors' passCopyToSink with no ops attached — but only when the
-# defining module is compiled as a dependency AND the proc is actually called
-# by the importer. Workaround used in rbtranstest's rbvalue.vow: a plain
+# History of the diagnosis: the bug originally surfaced here through
+# rbtranstest's rbvalue.vow (RbHashKey = distinct RbValue) with NO explicit
+# `sink` anywhere — via std Table. That Table-mediated form is a devel-only
+# regression: a verified 10-step git bisect landed on upstream 482662d
+# (PR #24724, 2025-03-23) which made Table key params `sink`, EXPOSING this
+# much older compiler bug to ordinary Table[distinct V, V] users. With an
+# explicit `sink` param (this file's form) the crash reproduces on every
+# version back to 2.0.0.
+#
+# Mechanism (diagnosed, not fixed): attached ops are keyed by PType itemId in
+# the ModuleGraph; hook lifting for a distinct (produceSymDistinctType
+# borrowing the base type's ops) never runs for this
+# recursive-through-the-distinct shape when the defining module is compiled
+# as a dependency, so the distinct's PType instance reaches passCopyToSink
+# with no ops attached. Workaround used in rbtranstest's rbvalue.vow: a plain
 # wrapper `object` (field v: RbValue) instead of `distinct` — real objects
 # always get hooks lifted; identical layout, zero runtime cost.
 #
-# No matching upstream issue found as of 2026-06-12 (#19250 is the same
-# assert from an unrelated closure-in-seq trigger) — worth reporting.
+# No matching upstream issue as of 2026-06-12 (#19250 is the same assert from
+# an unrelated closure-in-seq trigger). Upstream issue draft:
+# mx_rata_test repo, junk/nim_upstream_issue_draft.md.
 import test_vow_arc_distinct_mod
 
-put(Box(), Val())
+put(Val())
 echo "ok"
