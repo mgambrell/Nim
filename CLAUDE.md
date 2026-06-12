@@ -263,6 +263,16 @@ The `test_vow.vow` file is the comprehensive test suite. **Always run after comp
 bin/nim c test_vow.vow && ./test_vow
 ```
 
+### Known-failing repros (open compiler bugs, NOT in test_vow.vow)
+
+- `test_vow_arc_distinct_dep.nim` (+ `test_vow_arc_distinct_mod.nim`) —
+  cross-module `distinct` of a managed value variant loses its lifted ARC
+  hooks when the type recurses through the distinct (value variant ->
+  ref wrapper -> Table[distinct V, V]). The module compiles standalone;
+  the first importer dies in injectdestructors (proper error since
+  b22b532f4; bare assert crash on older binaries). Full ingredient list
+  and diagnosis in the file header. Promote it into the suite when fixed.
+
 ### Test Coverage
 
 | Category | Tests |
