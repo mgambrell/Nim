@@ -1,7 +1,9 @@
-# KNOWN-FAILING repro module — distinct-of-managed-value loses ARC hooks at a
-# cross-module sink copy. See test_vow_arc_distinct_dep.nim (the importer) for
-# the full story and run line. This module compiles CLEAN standalone; the bug
-# only fires when it is pulled in as a dependency.
+# Repro module for the distinct-over-managed sink-copy bug (FIXED in this
+# fork 2026-06-12; still open upstream). See test_vow_arc_distinct_dep.nim
+# (the importer) for the full story and run line. Standalone compilation of
+# this module was always clean — NOT because the bug was cross-module, but
+# because the uncalled put() never reached destructor injection (dead-code
+# trap; see the dep file).
 #
 # This is the UNIVERSAL form: 11 lines, zero imports, crashes every compiler
 # we tested — stock 2.0.0 / 2.2.0 / 2.2.8, upstream devel tip b44d373

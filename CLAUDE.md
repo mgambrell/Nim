@@ -263,15 +263,18 @@ The `test_vow.vow` file is the comprehensive test suite. **Always run after comp
 bin/nim c test_vow.vow && ./test_vow
 ```
 
-### Known-failing repros (open compiler bugs, NOT in test_vow.vow)
+### Compiler-bug regression repros
 
 - `test_vow_arc_distinct_dep.nim` (+ `test_vow_arc_distinct_mod.nim`) —
-  cross-module `distinct` of a managed value variant loses its lifted ARC
-  hooks when the type recurses through the distinct (value variant ->
-  ref wrapper -> Table[distinct V, V]). The module compiles standalone;
-  the first importer dies in injectdestructors (proper error since
-  b22b532f4; bare assert crash on older binaries). Full ingredient list
-  and diagnosis in the file header. Promote it into the suite when fixed.
+  `distinct` of a recursive managed value object passed (converted from an
+  lvalue) to a `sink` parameter. Upstream this has NEVER worked (silent
+  leak pre-1.6, ICE `not containsManagedMemory` since 1.6.0 via #16730,
+  exposed to plain Table users by #24724; still broken at devel b44d373).
+  FIXED in this fork (liftdestructors.nim: tfHasAsgn on canon + forwarding
+  bodies for abandoned distinct-op prototypes) — the repro must compile and
+  print ok; run it after compiler changes alongside test_vow.vow. Full
+  history and mechanism in the file header; upstream issue draft lives in
+  the mx_rata_test repo under junk/.
 
 ### Test Coverage
 

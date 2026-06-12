@@ -1090,10 +1090,40 @@ proc produceSymDistinctType(g: ModuleGraph; c: PContext; typ: PType;
                             idgen: IdGenerator): PSym =
   assert typ.kind == tyDistinct
   let baseType = typ.elementType
+  let prev = getAttachedOp(g, typ, kind)
   if getAttachedOp(g, baseType, kind) == nil:
     discard produceSym(g, c, baseType, kind, info, idgen)
   result = getAttachedOp(g, baseType, kind)
   setAttachedOp(g, idgen.module, typ, kind, result)
+  if prev != nil and prev != result and prev.ast != nil and
+      prev.ast[bodyPos].len == 0 and sfOverridden notin prev.flags:
+    # An empty prototype was attached to the distinct type itself (by
+    # createTypeBoundOps) and may already be referenced by code generated
+    # during the recursive lifting, e.g. by a generic instantiation such as
+    # 'setLen' for a seq of the distinct type. Since we replace the attached
+    # op with the base type's op instead of filling the prototype's body,
+    # give the prototype a forwarding body so that it does not remain a
+    # silent no-op (which caused leaks for distincts of managed objects).
+    var a = TLiftCtx(info: info, g: g, kind: kind, c: c, asgnForType: typ,
+                     idgen: idgen, fn: prev)
+    let dest = if kind == attachedDup: prev.ast[resultPos].sym
+               else: prev.typ.n[1].sym
+    let d = if prev.typ.firstParamType.kind == tyVar: newDeref(newSymNode(dest))
+            else: newSymNode(dest)
+    case kind
+    of attachedDestructor, attachedWasMoved:
+      prev.ast[bodyPos].add newOpCall(a, result,
+        if result.typ.firstParamType.kind == tyVar:
+          (if d.kind == nkHiddenDeref: d[0] else: genAddr(a, d))
+        else: d)
+    of attachedDup:
+      prev.ast[bodyPos].add newAsgnStmt(newSymNode(dest),
+        newOpCall(a, result, newSymNode(prev.typ.n[1].sym)))
+    of attachedAsgn, attachedSink, attachedTrace:
+      # (dest, src)-style hooks; newHookCall re-addresses 'd' as needed.
+      prev.ast[bodyPos].add newHookCall(a, result, d,
+        newSymNode(prev.typ.n[2].sym))
+    of attachedDeepCopy: discard
 
 proc symDupPrototype(g: ModuleGraph; typ: PType; owner: PSym; kind: TTypeAttachedOp;
               info: TLineInfo; idgen: IdGenerator): PSym =
@@ -1363,3 +1393,12 @@ proc createTypeBoundOps(g: ModuleGraph; c: PContext; orig: PType; info: TLineInf
     # IC: review this solution again later
     orig.flagsImpl.incl tfHasAsgn
     # ^ XXX Breaks IC!
+    if canon != orig:
+      # The attached ops live on 'canon' and were copied to 'orig'; the
+      # 'tfHasAsgn' flag must be kept consistent on both. Otherwise a
+      # reentrant createTypeBoundOps call (e.g. for a 'distinct' type that
+      # is reached again while its prototypes are still being filled in)
+      # can leave 'canon' marked as checked but without 'tfHasAsgn',
+      # so 'hasDestructor' wrongly yields false for it later; see the
+      # cross-module distinct-of-managed-object sink regression.
+      canon.flagsImpl.incl tfHasAsgn
