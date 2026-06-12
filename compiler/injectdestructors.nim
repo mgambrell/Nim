@@ -496,7 +496,13 @@ proc passCopyToSink(n: PNode; c: var Con; s: var Scope): PNode =
         ("cannot move '$1', passing '$1' to a sink parameter introduces an implicit copy") % $n)
   else:
     if c.graph.config.selectedGC in {gcArc, gcOrc, gcAtomicArc}:
-      assert(not containsManagedMemory(nTyp))
+      # MBG: this was `assert(not containsManagedMemory(nTyp))` — a bare
+      # compiler crash with no source location. Report it as a proper error
+      # instead so every offending site is listed with file/line and type.
+      if containsManagedMemory(nTyp):
+        localError(c.graph.config, n.info,
+          "passCopyToSink: type '" & typeToString(nTyp) &
+          "' contains managed memory but has no attached =destroy (compiler bug trigger; was an assert)")
     if nTyp.skipTypes(abstractInst).kind in {tyOpenArray, tyVarargs}:
       localError(c.graph.config, n.info, "cannot create an implicit openArray copy to be passed to a sink parameter")
     result.add newTree(nkAsgn, tmp, p(n, c, s, normal))
