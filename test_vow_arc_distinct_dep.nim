@@ -9,10 +9,13 @@
 #
 # Behavior matrix (all verified 2026-06-12):
 #   - stock nim 2.0.0 / 2.2.0 / 2.2.8:        compiles, prints ok
-#       -> upstream 2.3.x DEVEL regression, NOT an MBG-introduced bug
-#          (git history of liftdestructors/injectdestructors/modulegraphs in
-#          this fork is purely upstream merges; suspicion: the IC refactor
-#          line, #25282/#25344/#25427, which moved attached-op bookkeeping)
+#   - UPSTREAM DEVEL TIP b44d373 (2026-06-11): ASSERT-CRASH, both --mm:arc
+#       AND --mm:orc (stock assert site is injectdestructors.nim:467; the
+#       fork's is 499 from local additions). Confirmed live upstream
+#       regression 2.2.8 -> devel, NOT an MBG-introduced bug (git history
+#       of liftdestructors/injectdestructors/modulegraphs in this fork is
+#       purely upstream merges; suspicion: the IC refactor line,
+#       #25282/#25344/#25427, which moved attached-op bookkeeping)
 #   - this fork, module compiled STANDALONE:   compiles clean (the trap)
 #   - this fork, pre-b22b532f4 binary:         compiler CRASH —
 #       injectdestructors.nim(499) `not containsManagedMemory(nTyp)` assert
