@@ -1754,13 +1754,18 @@ proc parseReturnOrRaise(p: var Parser, kind: TNodeKind): PNode =
   #| discardStmt = 'discard' optInd expr?
   #| breakStmt = 'break' optInd expr?
   #| continueStmt = 'continue' optInd expr?
+  let kwLine = p.tok.line   # brace mode: an optional operand must start on the keyword's line
   result = newNodeP(kind, p)
   getTok(p)
   if p.tok.tokType == tkComment:
     skipComment(p, result)
     result.add(p.emptyNode)
-  elif p.tok.indent >= 0 and p.tok.indent <= p.currInd or not isExprStart(p):
-    # NL terminates:
+  elif (p.lex.braceMode and p.tok.line != kwLine) or
+      (p.tok.indent >= 0 and p.tok.indent <= p.currInd) or not isExprStart(p):
+    # NL terminates (in brace mode a newline before the operand terminates too,
+    # since indent tracking is disabled -- tok.indent is forced to -1 --, so the
+    # optional operand of return/raise/yield/discard/break/continue must start on
+    # the same line as the keyword; otherwise it would swallow the next statement):
     result.add(p.emptyNode)
     # nimpretty here!
   else:
