@@ -283,7 +283,14 @@ proc parLineInfo(p: Parser): TLineInfo =
   result = getLineInfo(p.lex, p.tok)
 
 proc indAndComment(p: var Parser, n: PNode, maybeMissEquals = false) =
-  if p.tok.indent > p.currInd:
+  # currInd < 0 is the "indent tracking disabled" sentinel: in brace mode every
+  # token's indent is forced to -1 and a section (const/let/var/type/using) seeds
+  # currInd = -1 via withInd. Without this guard, a `#;indent` (or `#;braces`)
+  # directive right after such a section makes the 1-token lookahead read the next
+  # statement with a REAL indent (e.g. 0) and compare 0 > -1 -> spurious
+  # "invalid indentation". Skip the over-indent check when there is no baseline;
+  # the else branch (skipComment) still attaches genuine trailing comments.
+  if p.currInd >= 0 and p.tok.indent > p.currInd:
     if p.tok.tokType == tkComment: rawSkipComment(p, n)
     elif maybeMissEquals:
       let col = p.bufposPrevious - p.lineStartPrevious
@@ -963,8 +970,14 @@ proc primarySuffix(p: var Parser, r: PNode,
       # `foo ref` or `foo ptr`. Unfortunately, these two are also
       # used as infix operators for the memory regions feature and
       # the current parsing rules don't play well here.
-      # In brace mode, don't use command syntax - statements end at expression boundaries
-      if inBraceMode(p):
+      # In brace mode indent tracking is disabled (tok.indent forced to -1), so the
+      # while-guard above can't tell a same-line command argument from the next
+      # statement. Use line numbers instead: a command argument must sit on the
+      # SAME source line as the callee (p.lineNumberPrevious = the callee token's
+      # line); a token on a new line begins the next statement, so break. This
+      # restores `addr x[0]` / `f a` command syntax in brace-mode expressions
+      # without swallowing the following statement.
+      if inBraceMode(p) and p.tok.line != p.lineNumberPrevious:
         break
       let isDotLike2 = p.tok.isDotLike
       if isDotLike2 and p.lex.config.isDefined("nimPreviewDotLikeOps"):
