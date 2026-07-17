@@ -88,8 +88,19 @@ type Node = object {
 
 ### Known Gotchas
 
-- **`addr` keyword**: Use function call syntax `addr(x)` not `addr x` in brace mode
+- **`addr` keyword / expression-context command syntax**: `addr x` (and other
+  space-separated command calls like `f a`) now work inside expressions in brace mode
+  as long as the argument is on the SAME line as the callee. (Fixed in `primarySuffix`;
+  brace mode compares token line numbers instead of the disabled indent.) Statement-level
+  command calls (a bare `echo x` as a whole statement) are still NOT enabled in brace
+  mode -- use `echo(x)`; that path is gated separately in `parseExprStmt`.
+- **Optional-operand statements** (`return`/`raise`/`yield`/`discard`/`break`/`continue`):
+  the value/label must be on the SAME line as the keyword; a newline terminates the
+  statement (C/JS-style), so `return` on its own line is a bare return.
 - **Set literals**: `{1, 2, 3}` works fine (parser distinguishes from blocks)
+- **`#;braces` / `#;indent` after a section**: fixed -- a mode-switch directive right
+  after a `const`/`let`/`var`/`type`/`using` block no longer raises spurious "invalid
+  indentation".
 
 ---
 
