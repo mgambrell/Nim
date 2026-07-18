@@ -88,12 +88,14 @@ type Node = object {
 
 ### Known Gotchas
 
-- **`addr` keyword / expression-context command syntax**: `addr x` (and other
-  space-separated command calls like `f a`) now work inside expressions in brace mode
-  as long as the argument is on the SAME line as the callee. (Fixed in `primarySuffix`;
-  brace mode compares token line numbers instead of the disabled indent.) Statement-level
-  command calls (a bare `echo x` as a whole statement) are still NOT enabled in brace
-  mode -- use `echo(x)`; that path is gated separately in `parseExprStmt`.
+- **Command syntax (space-separated calls, `addr x`)**: both expression-context
+  (`addr x`, `f a` inside a larger expression) and statement-level (a bare `echo x` /
+  `foo a, b` as a whole statement) command syntax now work in brace mode, in each case
+  only when the argument is on the SAME line as the callee -- a newline terminates the
+  statement (C/JS-style). (Fixed in `primarySuffix` and `parseExprStmt` respectively;
+  brace mode compares token line numbers instead of the disabled indent.) One exclusion:
+  a same-line `{` after the callee is NOT taken as a command argument -- it opens a block
+  -- so pass a set/table literal with parens: `foo({1, 2})`.
 - **Optional-operand statements** (`return`/`raise`/`yield`/`discard`/`break`/`continue`):
   the value/label must be on the SAME line as the keyword; a newline terminates the
   statement (C/JS-style), so `return` on its own line is a bare return.
@@ -101,6 +103,16 @@ type Node = object {
 - **`#;braces` / `#;indent` after a section**: fixed -- a mode-switch directive right
   after a `const`/`let`/`var`/`type`/`using` block no longer raises spurious "invalid
   indentation".
+- **Anonymous block / inline enum**: `block { ... }` (unlabeled) and inline `enum a, b`
+  (no braces, single line) both work; the inline enum terminates at the newline instead
+  of swallowing the next statement (same swallow class as optional operands, fixed in
+  `parseEnum`; anonymous block fixed in `parseBlock`).
+- **Known remaining brace-mode limitations** (indent-disabled sites without a `{` arm;
+  none occur in translated game code, so deferred -- use the indent-mode spelling or add
+  a brace arm mirroring `parseObjectCase`/`parseBraceBlock` when needed): object-variant
+  `when X { ... } else { ... }` inside `object { }` (`parseObjectPart`/`parseObjectWhen`);
+  `concept x { ... }` bodies (`parseTypeClass`); and `do`-block args `f() do { ... }`
+  (`postExprBlocks`). Each silently drops or mis-binds its `{ }` body in brace mode today.
 
 ---
 

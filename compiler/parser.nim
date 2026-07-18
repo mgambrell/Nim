@@ -1665,8 +1665,18 @@ proc parseExprStmt(p: var Parser): PNode =
     var isFirstParam = false
     # if an expression is starting here, a simplePrimary was parsed and
     # this is the start of a command
-    # In brace mode, don't use command syntax - each statement is self-contained
-    if not inBraceMode(p) and p.tok.indent < 0 and isExprStart(p):
+    # Indent mode: a command continues the same logical line (tok.indent < 0).
+    # Brace mode forces tok.indent = -1, so indent can't tell a same-line command
+    # argument from the next statement -- use line numbers instead. The argument
+    # must sit on the SAME source line as the end of `a` (a newline terminates the
+    # statement, C/JS-style). `{` is excluded in brace mode: it opens a block, not
+    # a command argument (postExprBlocks/block handling owns it).
+    let startsCommand =
+      if inBraceMode(p):
+        p.tok.line == p.lineNumberPrevious and p.tok.tokType != tkCurlyLe
+      else:
+        p.tok.indent < 0
+    if startsCommand and isExprStart(p):
       result = newTree(nkCommand, a.info, a)
       let baseIndent = p.currInd
       while true:
@@ -1979,7 +1989,11 @@ proc parseBlock(p: var Parser): PNode =
   #| blockExpr = 'block' symbol? colcom stmt
   result = newNodeP(nkBlockStmt, p)
   getTokNoInd(p)
-  if p.tok.tokType == tkColon: result.add(p.emptyNode)
+  # An unlabeled block is `block:` (indent) or `block { ... }` (brace). In brace
+  # mode the token after `block` is `{`, not `:`, so also treat that as label-less
+  # rather than trying to parse `{` as a block label symbol.
+  if p.tok.tokType == tkColon or (inBraceMode(p) and p.tok.tokType == tkCurlyLe):
+    result.add(p.emptyNode)
   else: result.add(parseSymbol(p))
   colcom(p, result)
   result.add(parseStmt(p))
@@ -2235,7 +2249,13 @@ proc parseEnum(p: var Parser): PNode =
         if p.tok.indent < 0 or p.tok.indent >= p.currInd:
           rawSkipComment(p, symPragma)
       result.add(symPragma)
-      if p.tok.indent >= 0 and p.tok.indent <= p.currInd or
+      # Brace mode disables indent tracking (tok.indent forced to -1), so the
+      # indent-based break never fires and an inline `enum a, b` (no braces) would
+      # swallow the next line's statement. Terminate on a newline instead, mirroring
+      # parseReturnOrRaise. The braced `enum { ... }` form is handled by the
+      # tkCurlyLe branch above and is unaffected.
+      if (inBraceMode(p) and p.tok.line != p.lineNumberPrevious) or
+          (p.tok.indent >= 0 and p.tok.indent <= p.currInd) or
           p.tok.tokType == tkEof:
         break
   if not result.has2Sons:

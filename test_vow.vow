@@ -184,6 +184,82 @@ proc testPragmas() = {
 }
 
 # ============================================================
+# Command syntax & optional-operand statements (brace mode)
+# ============================================================
+
+# Statement-level command syntax: a bare `callee arg` with the argument on the
+# SAME line as the callee (a newline terminates the statement, C/JS-style).
+proc cmdShow(a: int) = { echo("cmdShow: ", a) }
+proc cmdShow2(a: int, b: string) = { echo("cmdShow2: ", a, " ", b) }
+
+proc testStatementCommand() = {
+  cmdShow 7
+  cmdShow2 3, "three"
+  echo "bare echo"
+  # two commands on separate lines stay separate (newline is the boundary):
+  cmdShow 1
+  cmdShow 2
+  # a same-line `{` opens a block, not a command argument, so a set literal
+  # passed to a command needs parens:
+  echo("set arg: ", {1, 2})
+}
+
+# Expression-context command syntax: `addr x[i]` without parens.
+proc testAddrCommand() = {
+  var arr = @[10, 20, 30]
+  var p = addr arr[1]
+  p[] = p[] + 5
+  echo("addr command: ", arr[1])
+}
+
+# Optional-operand statements: the operand must be on the keyword's own line; a
+# bare `return`/`break`/`continue` does not swallow the next line's statement.
+proc earlyReturn(x: int): int = {
+  if x < 0 {
+    return
+  }
+  result = x * 2
+}
+
+proc loopBreakContinue(): int = {
+  var total = 0
+  for i in 0..5 {
+    if i == 2 {
+      continue
+    }
+    if i == 4 {
+      break
+    }
+    total = total + i
+  }
+  result = total
+}
+
+proc testOptionalOperand() = {
+  echo("early return neg: ", earlyReturn(-1))
+  echo("early return pos: ", earlyReturn(5))
+  echo("break/continue: ", loopBreakContinue())
+}
+
+# Anonymous (unlabeled) block in brace mode: `block { ... }`.
+proc testAnonBlock() = {
+  var hit = 0
+  block {
+    hit = 7
+  }
+  echo("anon block: ", hit)
+}
+
+# Inline `enum a, b` (no braces) must terminate at the newline and NOT swallow the
+# following top-level statement. `inlineSentinel` right below proves it.
+type InlineEnum = enum iea, ieb, iec
+var inlineSentinel = 42
+
+proc testInlineEnum() = {
+  echo("inline enum: ord(iec)=", ord(iec), " sentinel=", inlineSentinel)
+}
+
+# ============================================================
 # PART 2: Alias Tests (in brace mode)
 # ============================================================
 
@@ -401,6 +477,11 @@ testIndentMode()
 testBracesAgain()
 testSemicolons()
 testPragmas()
+testStatementCommand()
+testAddrCommand()
+testOptionalOperand()
+testAnonBlock()
+testInlineEnum()
 
 echo("")
 echo("--- Alias Tests ---")
